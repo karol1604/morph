@@ -3,7 +3,7 @@ const std = @import("std");
 pub const Location = struct {
     offset: usize,
     line: usize,
-    column: usize,
+    col: usize,
 };
 
 pub const Span = struct {
@@ -20,9 +20,9 @@ pub const Span = struct {
     pub fn format(self: Span, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("{d}:{d}..{d}:{d} (offset: [{d}..{d}])", .{
             self.start.line,
-            self.start.column,
+            self.start.col,
             self.end.line,
-            self.end.column,
+            self.end.col,
             self.start.offset,
             self.end.offset,
         });

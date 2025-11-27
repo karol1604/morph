@@ -74,6 +74,11 @@ pub const Token = struct {
             // else => try writer.print("TOK_OTHER", .{}),
         }
 
-        try writer.print("({d}:{d})", .{ self.span.start.offset, self.span.end.offset });
+        try writer.print("({d}:{d}) at ({d}, {d})", .{
+            self.span.start.offset,
+            self.span.end.offset,
+            self.span.start.col,
+            self.span.end.col,
+        });
     }
 };

@@ -10,13 +10,13 @@ const Span = span.Span;
 const Location = span.Location;
 
 pub const Lexer = struct {
-    ctx: context.CompilerContext,
-    currentPos: usize = 0,
+    ctx: *context.CompilerContext,
+    currentPos: usize = 0, // offset
     line: usize = 1,
     col: usize = 1,
     utf8Iter: std.unicode.Utf8Iterator,
 
-    pub fn init(ctx: context.CompilerContext) !Lexer {
+    pub fn init(ctx: *context.CompilerContext) !Lexer {
         return Lexer{
             .ctx = ctx,
             .utf8Iter = (try std.unicode.Utf8View.init(ctx.source)).iterator(),
@@ -28,9 +28,9 @@ pub const Lexer = struct {
     }
 
     fn currentLocation(self: *const Lexer) span.Location {
-        return span.Location{
+        return Location{
             .line = self.line,
-            .column = self.col,
+            .col = self.col,
             .offset = self.currentPos,
         };
     }
@@ -95,19 +95,20 @@ pub const Lexer = struct {
         const prevLocation = self.currentLocation();
         const c = try self.advance();
 
+        const singleCharTokSpan = Span{ .start = prevLocation, .end = self.currentLocation() };
         switch (c) {
-            '+' => return Token{ .kind = .Plus, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '-' => return Token{ .kind = .Minus, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '*' => return Token{ .kind = .Star, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '/' => return Token{ .kind = .Slash, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '^' => return Token{ .kind = .Caret, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '(' => return Token{ .kind = .LParen, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            ')' => return Token{ .kind = .RParen, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '[' => return Token{ .kind = .LSquare, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            ']' => return Token{ .kind = .RSquare, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '{' => return Token{ .kind = .LBrace, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            '}' => return Token{ .kind = .RBrace, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
-            ';' => return Token{ .kind = .Semicolon, .span = Span{ .start = prevLocation, .end = self.currentLocation() } },
+            '+' => return Token{ .kind = .Plus, .span = singleCharTokSpan },
+            '-' => return Token{ .kind = .Minus, .span = singleCharTokSpan },
+            '*' => return Token{ .kind = .Star, .span = singleCharTokSpan },
+            '/' => return Token{ .kind = .Slash, .span = singleCharTokSpan },
+            '^' => return Token{ .kind = .Caret, .span = singleCharTokSpan },
+            '(' => return Token{ .kind = .LParen, .span = singleCharTokSpan },
+            ')' => return Token{ .kind = .RParen, .span = singleCharTokSpan },
+            '[' => return Token{ .kind = .LSquare, .span = singleCharTokSpan },
+            ']' => return Token{ .kind = .RSquare, .span = singleCharTokSpan },
+            '{' => return Token{ .kind = .LBrace, .span = singleCharTokSpan },
+            '}' => return Token{ .kind = .RBrace, .span = singleCharTokSpan },
+            ';' => return Token{ .kind = .Semicolon, .span = singleCharTokSpan },
 
             '0'...'9' => {
                 return try self.makeNumberToken(prevLocation);
@@ -147,6 +148,9 @@ pub const Lexer = struct {
             },
 
             else => {
+                if (utils.isSpecial(c)) {
+                    return try self.makeIdentifierToken(prevLocation);
+                }
                 // Unknown character
                 return error.UnexpectedCharacter;
             },
