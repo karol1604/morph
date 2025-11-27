@@ -9,6 +9,9 @@ pub const TokenType = union(enum) {
     Caret,
     Bang,
 
+    True,
+    False,
+
     Semicolon,
 
     LParen,
@@ -32,8 +35,38 @@ pub const TokenType = union(enum) {
     Eof,
 
     pub fn format(self: TokenType, writer: *std.io.Writer) !void {
-        _ = self;
-        try writer.print("token_type_here", .{});
+        switch (self) {
+            .Plus => try writer.print("+", .{}),
+            .Minus => try writer.print("-", .{}),
+            .Star => try writer.print("*", .{}),
+            .Slash => try writer.print("/", .{}),
+            .Caret => try writer.print("^", .{}),
+            .Bang => try writer.print("!", .{}),
+
+            .True => try writer.print("true", .{}),
+            .False => try writer.print("false", .{}),
+
+            .Semicolon => try writer.print(";", .{}),
+
+            .LParen => try writer.print("(", .{}),
+            .RParen => try writer.print(")", .{}),
+            .LSquare => try writer.print("[", .{}),
+            .RSquare => try writer.print("]", .{}),
+            .LBrace => try writer.print("{{", .{}),
+            .RBrace => try writer.print("}}", .{}),
+
+            .Equal => try writer.print("=", .{}),
+            .NotEqual => try writer.print("!=", .{}),
+            .LessThan => try writer.print("<", .{}),
+            .GreaterThan => try writer.print(">", .{}),
+            .LessThanOrEqual => try writer.print("<=", .{}),
+            .GreaterThanOrEqual => try writer.print(">=", .{}),
+            .DoubleEqual => try writer.print("==", .{}),
+
+            .Identifier => |_| try writer.print("Ident", .{}),
+            .IntLiteral => |_| try writer.print("IntLiteral", .{}),
+            .Eof => try writer.print("EOF", .{}),
+        }
     }
 };
 
@@ -52,6 +85,9 @@ pub const Token = struct {
             .Slash => try writer.print("TOK_SLASH", .{}),
             .Caret => try writer.print("TOK_CARET", .{}),
             .Bang => try writer.print("TOK_BANG", .{}),
+
+            .True => try writer.print("TOK_TRUE", .{}),
+            .False => try writer.print("TOK_FALSE", .{}),
 
             .Semicolon => try writer.print("TOK_SEMICOLON", .{}),
 
@@ -82,3 +118,8 @@ pub const Token = struct {
         });
     }
 };
+
+pub const Keywords = std.StaticStringMap(TokenType).initComptime(.{
+    .{ "true", .True },
+    .{ "false", .False },
+});

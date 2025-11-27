@@ -35,20 +35,33 @@ pub const Parser = struct {
         return ptr;
     }
 
-    pub fn parse(self: *Parser) !void {
+    pub fn parse(self: *Parser) ![]*Expr {
+        var res: std.ArrayList(*Expr) = .empty;
+
         while (self.currentToken().kind != .Eof) {
-            std.debug.print("Parsing token: {f}\n", .{self.currentToken()});
             const expr = try self.parseExpression(.Lowest);
-            utils.prettyPrintExpression(expr.*);
+            try res.append(self.ctx.allocator, expr);
+
+            if (self.currentToken().kind == .Semicolon) {
+                self.advance(); // Eat the ';'
+            } else if (self.currentToken().kind != .Eof) {
+                std.debug.print("Expected semicolon between expressions, found {s}\n", .{@tagName(self.currentToken().kind)});
+                return error.ExpectedSemicolon;
+            }
         }
+
+        return try res.toOwnedSlice(self.ctx.allocator);
     }
 
-    fn parseExpression(self: *Parser, prec: Precedence) anyerror!*Expr {
+    // FIXME: remove the `pub`
+    pub fn parseExpression(self: *Parser, prec: Precedence) anyerror!*Expr {
         var expr = switch (self.currentToken().kind) {
             .IntLiteral => try self.parseIntLiteral(),
             .Identifier => try self.parseVariableIdentifier(),
+            .True, .False => try self.parserBoolLiteral(),
             .Plus, .Minus, .Bang => try self.parseUnaryExpression(),
             .LParen => try self.parseGroupExpression(),
+            .LBrace => try self.parseBlockExpression(),
             else => return error.UnsupportedToken,
         };
 
@@ -83,6 +96,40 @@ pub const Parser = struct {
         });
     }
 
+    fn parseBlockExpression(self: *Parser) !*Expr {
+        const startSpan = self.currentToken().span;
+        self.advance(); // consume the left brace
+
+        var statements: std.ArrayList(*Expr) = .empty;
+        var tail: ?*Expr = null;
+
+        while (self.currentToken().kind != .RBrace and self.currentToken().kind != .Eof) {
+            // Parse the expression
+            const expr = try self.parseExpression(.Lowest);
+
+            if (self.currentToken().kind == .Semicolon) {
+                // Case 1: expr; -> value is discarded
+                self.advance(); // eat semicolon
+                try statements.append(self.ctx.allocator, expr);
+            } else {
+                // Case 2: expr -> potentially the tail
+                tail = expr;
+                // If we don't see a '}', it's a syntax error (missing semicolon)
+                if (self.currentToken().kind != .RBrace) {
+                    return error.ExpectedSemicolon;
+                }
+            }
+        }
+
+        const endSpan = self.currentToken().span;
+        _ = try self.expect(.RBrace);
+
+        return self.heapAlloc(Expr, .{
+            .kind = .{ .Block = .{ .stmts = try statements.toOwnedSlice(self.ctx.allocator), .tail = tail } },
+            .span = Span.join(startSpan, endSpan),
+        });
+    }
+
     fn parseGroupExpression(self: *Parser) !*Expr {
         self.advance(); // consume the left paren
         const expr = self.parseExpression(.Lowest);
@@ -91,6 +138,22 @@ pub const Parser = struct {
         }
         self.advance(); // consume right paren
         return expr;
+    }
+
+    fn parserBoolLiteral(self: *Parser) !*Expr {
+        const boolTok = self.currentToken();
+        const val = switch (boolTok.kind) {
+            .True => true,
+            .False => false,
+            else => unreachable,
+        };
+
+        self.advance();
+
+        return self.heapAlloc(Expr, .{
+            .kind = .{ .BoolLiteral = val },
+            .span = boolTok.span,
+        });
     }
 
     fn parseIntLiteral(self: *Parser) !*Expr {
@@ -132,6 +195,16 @@ pub const Parser = struct {
             .kind = .{ .Unary = .{ .operator = op, .right = rhs } },
             .span = Span.join(opToken.span, rhs.span),
         });
+    }
+
+    fn expect(self: *Parser, expected: TokenType) !Token {
+        if (std.meta.eql(expected, self.currentToken().kind)) {
+            const tok = self.currentToken();
+            self.advance();
+            return tok;
+        }
+        std.debug.print("Expected `{f}`, got `{f}`.\n", .{ expected, self.currentToken().kind });
+        return error.UnexpectedToken;
     }
 
     fn getUnaryOperator(tokenType: TokenType) ?UnaryOperator {

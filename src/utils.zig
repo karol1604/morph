@@ -58,6 +58,9 @@ fn prettyPrintRec(
         .Identifier => |name| {
             std.debug.print("Identifier {s}\n", .{name});
         },
+        .BoolLiteral => |val| {
+            std.debug.print("BoolLiteral {s}\n", .{if (val) "true" else "false"});
+        },
         .Unary => |u| {
             const opStr = switch (u.operator) {
                 .Plus => "+",
@@ -95,6 +98,24 @@ fn prettyPrintRec(
             prettyPrintRec(b.left.*.kind, depth + 1, treeLines, false);
             // right is last
             prettyPrintRec(b.right.*.kind, depth + 1, treeLines, true);
+        },
+        .Block => |blk| {
+            std.debug.print("Block\n", .{});
+
+            treeLines[depth] = !isLast;
+
+            const has_tail = (blk.tail != null);
+            const stmt_count = blk.stmts.len;
+
+            for (blk.stmts, 0..) |stmt, i| {
+                const is_last_child = (i == stmt_count - 1) and (!has_tail);
+
+                prettyPrintRec(stmt.kind, depth + 1, treeLines, is_last_child);
+            }
+
+            if (blk.tail) |t| {
+                prettyPrintRec(t.kind, depth + 1, treeLines, true);
+            }
         },
         // else => {},
     }

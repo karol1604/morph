@@ -1,3 +1,4 @@
+const std = @import("std");
 const span = @import("span.zig");
 
 pub const Expr = struct {
@@ -8,6 +9,7 @@ pub const Expr = struct {
 pub const ExprKind = union(enum) {
     IntLiteral: i64,
     Identifier: []const u8,
+    BoolLiteral: bool,
 
     Unary: struct {
         operator: UnaryOperator,
@@ -18,6 +20,11 @@ pub const ExprKind = union(enum) {
         left: *const Expr,
         operator: BinaryOperator,
         right: *const Expr,
+    },
+
+    Block: struct {
+        stmts: []const *Expr,
+        tail: ?*const Expr,
     },
 };
 

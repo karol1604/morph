@@ -8,6 +8,7 @@ const Token = token.Token;
 const TokenType = token.TokenType;
 const Span = span.Span;
 const Location = span.Location;
+const Keywords = token.Keywords;
 
 pub const Lexer = struct {
     ctx: *context.CompilerContext,
@@ -88,6 +89,14 @@ pub const Lexer = struct {
             .end = endLocation,
         };
         const identStr = self.ctx.source[tokSpan.start.offset..tokSpan.end.offset];
+
+        const tokType = Keywords.get(identStr);
+
+        if (tokType) |typ| {
+            // try self.addToken(typ, tokSpan);
+            return .{ .kind = typ, .span = tokSpan };
+        }
+
         return Token{ .kind = .{ .Identifier = identStr }, .span = tokSpan };
     }
 
