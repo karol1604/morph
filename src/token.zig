@@ -9,10 +9,18 @@ pub const TokenType = union(enum) {
     Caret,
     Bang,
 
-    True,
-    False,
+    KwTrue,
+    KwFalse,
+    KwLet,
+
+    RightArrow,
+    DoubleRightArrow,
+    In, // ∈
+    Cross, // ×
 
     Semicolon,
+    Comma,
+    Colon,
 
     LParen,
     RParen,
@@ -43,10 +51,18 @@ pub const TokenType = union(enum) {
             .Caret => try writer.print("^", .{}),
             .Bang => try writer.print("!", .{}),
 
-            .True => try writer.print("true", .{}),
-            .False => try writer.print("false", .{}),
+            .KwTrue => try writer.print("true", .{}),
+            .KwFalse => try writer.print("false", .{}),
+            .KwLet => try writer.print("let", .{}),
+
+            .RightArrow => try writer.print("->", .{}),
+            .DoubleRightArrow => try writer.print("=>", .{}),
+            .In => try writer.print("∈", .{}),
+            .Cross => try writer.print("×", .{}),
 
             .Semicolon => try writer.print(";", .{}),
+            .Comma => try writer.print(",", .{}),
+            .Colon => try writer.print(":", .{}),
 
             .LParen => try writer.print("(", .{}),
             .RParen => try writer.print(")", .{}),
@@ -86,10 +102,18 @@ pub const Token = struct {
             .Caret => try writer.print("TOK_CARET", .{}),
             .Bang => try writer.print("TOK_BANG", .{}),
 
-            .True => try writer.print("TOK_TRUE", .{}),
-            .False => try writer.print("TOK_FALSE", .{}),
+            .RightArrow => try writer.print("TOK_RIGHTARROW", .{}),
+            .DoubleRightArrow => try writer.print("TOK_DOUBLERIGHTARROW", .{}),
+            .In => try writer.print("TOK_IN", .{}),
+            .Cross => try writer.print("TOK_TIMES", .{}),
+
+            .KwTrue => try writer.print("KW_TRUE", .{}),
+            .KwFalse => try writer.print("KW_FALSE", .{}),
+            .KwLet => try writer.print("KW_LET", .{}),
 
             .Semicolon => try writer.print("TOK_SEMICOLON", .{}),
+            .Comma => try writer.print("TOK_COMMA", .{}),
+            .Colon => try writer.print("TOK_COLON", .{}),
 
             .LParen => try writer.print("TOK_LPAREN", .{}),
             .RParen => try writer.print("TOK_RPAREN", .{}),
@@ -120,6 +144,7 @@ pub const Token = struct {
 };
 
 pub const Keywords = std.StaticStringMap(TokenType).initComptime(.{
-    .{ "true", .True },
-    .{ "false", .False },
+    .{ "true", .KwTrue },
+    .{ "false", .KwFalse },
+    .{ "let", .KwLet },
 });

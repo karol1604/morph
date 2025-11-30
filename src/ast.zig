@@ -22,9 +22,21 @@ pub const ExprKind = union(enum) {
         right: *const Expr,
     },
 
+    VariableDecl: struct {
+        name: []const u8,
+        value: *const Expr,
+        type: ?[]const u8,
+    },
+
     Block: struct {
         stmts: []const *Expr,
         tail: ?*const Expr,
+    },
+
+    FunctionTypeSignature: struct {
+        name: []const u8,
+        domain: *const Expr,
+        codomain: *const Expr,
     },
 };
 
@@ -39,6 +51,7 @@ pub const BinaryOperator = union(enum) {
     Minus,
     Divide,
     Multiply,
+    TypeProduct,
     Exponent,
 
     Equal,

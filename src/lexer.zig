@@ -39,9 +39,8 @@ pub const Lexer = struct {
     fn advance(self: *Lexer) !u21 {
         const c = self.utf8Iter.nextCodepoint() orelse 0;
 
-        var charBuf: [4]u8 = undefined;
-        const utf8Bytes = try utils.encodeCodepointToUtf8(c, &charBuf);
-        self.currentPos += utf8Bytes.len;
+        const byteLen: usize = @intCast(try std.unicode.utf8CodepointSequenceLength(c));
+        self.currentPos += byteLen;
 
         if (c == '\n') {
             self.line += 1;
@@ -107,7 +106,6 @@ pub const Lexer = struct {
         const singleCharTokSpan = Span{ .start = prevLocation, .end = self.currentLocation() };
         switch (c) {
             '+' => return Token{ .kind = .Plus, .span = singleCharTokSpan },
-            '-' => return Token{ .kind = .Minus, .span = singleCharTokSpan },
             '*' => return Token{ .kind = .Star, .span = singleCharTokSpan },
             '/' => return Token{ .kind = .Slash, .span = singleCharTokSpan },
             '^' => return Token{ .kind = .Caret, .span = singleCharTokSpan },
@@ -118,6 +116,18 @@ pub const Lexer = struct {
             '{' => return Token{ .kind = .LBrace, .span = singleCharTokSpan },
             '}' => return Token{ .kind = .RBrace, .span = singleCharTokSpan },
             ';' => return Token{ .kind = .Semicolon, .span = singleCharTokSpan },
+            ':' => return Token{ .kind = .Colon, .span = singleCharTokSpan },
+            ',' => return Token{ .kind = .Comma, .span = singleCharTokSpan },
+            '∈' => return Token{ .kind = .In, .span = singleCharTokSpan },
+            '×' => return Token{ .kind = .Cross, .span = singleCharTokSpan },
+
+            '-' => {
+                if (try self.match('>')) {
+                    return Token{ .kind = .RightArrow, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                } else {
+                    return Token{ .kind = .Minus, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                }
+            },
 
             '0'...'9' => {
                 return try self.makeNumberToken(prevLocation);
@@ -144,6 +154,8 @@ pub const Lexer = struct {
             '=' => {
                 if (try self.match('=')) {
                     return Token{ .kind = .DoubleEqual, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                } else if (try self.match('>')) {
+                    return Token{ .kind = .DoubleRightArrow, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
                 } else {
                     return Token{ .kind = .Equal, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
                 }
@@ -185,6 +197,6 @@ pub const Lexer = struct {
             self.ctx.allocator,
             .{ .kind = .Eof, .span = Span{ .start = self.currentLocation(), .end = self.currentLocation() } },
         );
-        return toks.items;
+        return toks.toOwnedSlice(self.ctx.allocator);
     }
 };

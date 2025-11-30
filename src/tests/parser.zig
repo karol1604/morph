@@ -30,7 +30,7 @@ test "precedence: multiplication before addition" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const root = try parse(&arena, "1 + 2 * 3");
+    const root = try parse(&arena, "1 + 2 * 3;");
 
     // Root should be Plus
     try testing.expectEqual(ast.BinaryOperator.Plus, root.kind.Binary.operator);

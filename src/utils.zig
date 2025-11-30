@@ -75,11 +75,22 @@ fn prettyPrintRec(
             // recurse on the single child (always the last one)
             prettyPrintRec(u.right.*.kind, depth + 1, treeLines, true);
         },
+        .VariableDecl => |varDecl| {
+            if (varDecl.type) |ty| {
+                std.debug.print("VariableDecl {s} (∈ {s}) =\n", .{ varDecl.name, ty });
+            } else {
+                std.debug.print("VariableDecl {s} =\n", .{varDecl.name});
+            }
+
+            treeLines[depth] = !isLast;
+            prettyPrintRec(varDecl.value.*.kind, depth + 1, treeLines, true);
+        },
         .Binary => |b| {
             const opStr = switch (b.operator) {
                 .Plus => "+",
                 .Minus => "-",
                 .Multiply => "*",
+                .TypeProduct => "×",
                 .Divide => "/",
                 .Exponent => "^",
                 .Equal => "==",
@@ -116,6 +127,17 @@ fn prettyPrintRec(
             if (blk.tail) |t| {
                 prettyPrintRec(t.kind, depth + 1, treeLines, true);
             }
+        },
+        .FunctionTypeSignature => |sig| {
+            std.debug.print("TypeSignature: {s}\n", .{sig.name});
+
+            treeLines[depth] = !isLast;
+
+            // Child 1: Domain (Input) - Not Last
+            prettyPrintRec(sig.domain.*.kind, depth + 1, treeLines, false);
+
+            // Child 2: Codomain (Output) - Last
+            prettyPrintRec(sig.codomain.*.kind, depth + 1, treeLines, true);
         },
         // else => {},
     }

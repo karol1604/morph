@@ -39,13 +39,14 @@ pub const Parser = struct {
         var res: std.ArrayList(*Expr) = .empty;
 
         while (self.currentToken().kind != .Eof) {
-            const expr = try self.parseExpression(.Lowest);
+            // const expr = try self.parseExpression(.Lowest);
+            const expr = try self.parseTopLevelExpression();
             try res.append(self.ctx.allocator, expr);
 
             if (self.currentToken().kind == .Semicolon) {
                 self.advance(); // Eat the ';'
             } else if (self.currentToken().kind != .Eof) {
-                std.debug.print("Expected semicolon between expressions, found {s}\n", .{@tagName(self.currentToken().kind)});
+                std.debug.print("Expected semicolon between expressions, found {f}\n", .{self.currentToken().kind});
                 return error.ExpectedSemicolon;
             }
         }
@@ -53,16 +54,60 @@ pub const Parser = struct {
         return try res.toOwnedSlice(self.ctx.allocator);
     }
 
+    fn parseTopLevelExpression(self: *Parser) !*Expr {
+        if (self.currentToken().kind != .Identifier) {
+            return try self.parseExpression(.Lowest);
+        }
+        switch (self.peekToken().kind) {
+            .Colon => return try self.parseFunctionTypeSignature(),
+            .LParen => {
+                if (self.isFunctionDefinition()) {
+                    return error.FunctionDefNotSupported;
+                }
+                return error.FunctionCallNotSupported;
+            },
+            else => return try self.parseExpression(.Lowest),
+        }
+    }
+
+    fn isFunctionDefinition(self: *Parser) bool {
+        var offset: usize = 1;
+
+        if (self.current + offset >= self.tokens.len) return false;
+        if (self.tokens[self.current + offset].kind != .LParen) return false;
+
+        offset += 1;
+        var openParens: usize = 1;
+        while (self.current + offset < self.tokens.len and openParens > 0) : (offset += 1) {
+            const tok = self.tokens[self.current + offset];
+            if (tok.kind == .LParen) {
+                openParens += 1;
+            } else if (tok.kind == .RParen) {
+                openParens -= 1;
+            }
+        }
+
+        if (self.current + offset < self.tokens.len) {
+            return self.tokens[self.current + offset].kind == .DoubleRightArrow;
+        }
+
+        return false;
+    }
+
     // FIXME: remove the `pub`
     pub fn parseExpression(self: *Parser, prec: Precedence) anyerror!*Expr {
         var expr = switch (self.currentToken().kind) {
             .IntLiteral => try self.parseIntLiteral(),
-            .Identifier => try self.parseVariableIdentifier(),
-            .True, .False => try self.parserBoolLiteral(),
+            .Identifier => try self.parseIdentifier(),
+            .KwTrue, .KwFalse => try self.parseBoolLiteral(),
+            .KwLet => try self.parseVariableDecl(),
             .Plus, .Minus, .Bang => try self.parseUnaryExpression(),
             .LParen => try self.parseGroupExpression(),
             .LBrace => try self.parseBlockExpression(),
-            else => return error.UnsupportedToken,
+            else => {
+                std.debug.print("Invalid token: `{f}`\n", .{self.currentToken().kind});
+                return error.UnsupportedToken;
+            },
         };
 
         while (self.currentToken().kind != .Eof and self.currentPrec() > @intFromEnum(prec)) {
@@ -75,6 +120,87 @@ pub const Parser = struct {
 
             expr = try self.parseBinaryExpression(expr, semanticOp.?, self.getTokenPrec(opKind));
         }
+        return expr;
+    }
+
+    fn parseFunctionTypeSignature(self: *Parser) !*Expr {
+        const name = try self.parseIdentifier(); // consumes the name
+        _ = try self.expect(.Colon);
+
+        const domain = try self.parseTypeExpression(.Lowest);
+
+        _ = try self.expect(.RightArrow);
+
+        const codomain = try self.parseTypeExpression(.Lowest);
+
+        // const semicl = try self.expect(.Semicolon);
+
+        return self.heapAlloc(Expr, Expr{
+            .kind = .{ .FunctionTypeSignature = .{
+                .name = name.kind.Identifier,
+                .domain = domain,
+                .codomain = codomain,
+            } },
+            .span = Span.join(name.span, codomain.span),
+        });
+    }
+
+    fn parseTypeExpression(self: *Parser, prec: Precedence) !*Expr {
+        var left = try self.parseTypePrefix();
+
+        while (self.currentToken().kind != .Eof and self.currentPrec() > @intFromEnum(prec)) {
+            const tok = self.currentToken();
+            std.debug.print("TOK: {f}\n", .{tok});
+
+            // Only allow Type-valid operators here
+            var op: BinaryOperator = undefined;
+            switch (tok.kind) {
+                .Cross => {
+                    op = .TypeProduct;
+                }, // `×` symbol
+                .Caret => {
+                    op = .Exponent;
+                }, // `^` symbol
+                else => return left,
+            }
+
+            self.advance();
+
+            // Recurse for the right side
+            const right = try self.parseTypeExpression(self.getTokenPrec(tok.kind));
+
+            left = try self.heapAlloc(Expr, .{
+                .kind = .{ .Binary = .{
+                    .left = left,
+                    .operator = op,
+                    .right = right,
+                } },
+                .span = Span.join(left.span, right.span),
+            });
+        }
+
+        return left;
+    }
+
+    fn parseTypePrefix(self: *Parser) !*Expr {
+        switch (self.currentToken().kind) {
+            .Identifier => return try self.parseIdentifier(),
+            .IntLiteral => return try self.parseIntLiteral(),
+            .LParen => return try self.parseTypeGroupExpression(),
+            else => {
+                std.debug.print("CURRENT: {f}\n", .{self.currentToken()});
+                return error.ExpectedType;
+            },
+        }
+    }
+
+    fn parseTypeGroupExpression(self: *Parser) anyerror!*Expr {
+        self.advance(); // consume the left paren
+        const expr = try self.parseTypeExpression(.Lowest);
+        if (self.currentToken().kind != .RParen) {
+            return error.UnclosedLParen;
+        }
+        self.advance(); // consume right paren
         return expr;
     }
 
@@ -97,6 +223,9 @@ pub const Parser = struct {
     }
 
     fn parseBlockExpression(self: *Parser) !*Expr {
+        // exprs followed by `;` have their values discarded
+        // the last expression without ';' becomes the block's value (tail)
+        // empty blocks evaluate to unit
         const startSpan = self.currentToken().span;
         self.advance(); // consume the left brace
 
@@ -132,7 +261,7 @@ pub const Parser = struct {
 
     fn parseGroupExpression(self: *Parser) !*Expr {
         self.advance(); // consume the left paren
-        const expr = self.parseExpression(.Lowest);
+        const expr = try self.parseExpression(.Lowest);
         if (self.currentToken().kind != .RParen) {
             return error.UnclosedLParen;
         }
@@ -140,11 +269,11 @@ pub const Parser = struct {
         return expr;
     }
 
-    fn parserBoolLiteral(self: *Parser) !*Expr {
+    fn parseBoolLiteral(self: *Parser) !*Expr {
         const boolTok = self.currentToken();
         const val = switch (boolTok.kind) {
-            .True => true,
-            .False => false,
+            .KwTrue => true,
+            .KwFalse => false,
             else => unreachable,
         };
 
@@ -171,9 +300,35 @@ pub const Parser = struct {
         });
     }
 
-    fn parseVariableIdentifier(self: *Parser) !*Expr {
+    fn parseVariableDecl(self: *Parser) !*Expr {
+        const startSpan = self.currentToken().span;
+        self.advance(); // consume `let`
+
+        const name = try self.expectIdent(); // consume the ident
+
+        var ty: ?[]const u8 = null;
+        if (self.currentToken().kind == .In) {
+            self.advance(); // consume the `in`
+            ty = try self.expectIdent();
+        }
+        _ = try self.expect(.Equal); // consume `=`
+
+        const value = try self.parseExpression(.Lowest);
+        const endSpan = value.span;
+
+        return self.heapAlloc(Expr, .{
+            .kind = .{ .VariableDecl = .{
+                .name = name,
+                .value = value,
+                .type = ty,
+            } },
+            .span = Span.join(startSpan, endSpan),
+        });
+    }
+
+    fn parseIdentifier(self: *Parser) !*Expr {
         const start_span = self.currentToken().span;
-        const ident = try self.expectIdent();
+        const ident = try self.expectIdent(); // consumes the ident
 
         return self.heapAlloc(Expr, Expr{
             .kind = .{ .Identifier = ident },
@@ -207,15 +362,6 @@ pub const Parser = struct {
         return error.UnexpectedToken;
     }
 
-    fn getUnaryOperator(tokenType: TokenType) ?UnaryOperator {
-        return switch (tokenType) {
-            .Plus => .Plus,
-            .Minus => .Minus,
-            .Bang => .Not,
-            else => null,
-        };
-    }
-
     fn expectIdent(self: *Parser) ![]const u8 {
         switch (self.currentToken().kind) {
             .Identifier => |ident| {
@@ -224,6 +370,15 @@ pub const Parser = struct {
             },
             else => return error.ExpectedIdentifier,
         }
+    }
+
+    fn getUnaryOperator(tokenType: TokenType) ?UnaryOperator {
+        return switch (tokenType) {
+            .Plus => .Plus,
+            .Minus => .Minus,
+            .Bang => .Not,
+            else => null,
+        };
     }
 
     fn currentToken(self: *Parser) Token {
@@ -236,12 +391,20 @@ pub const Parser = struct {
         }
     }
 
+    fn peekToken(self: *Parser) Token {
+        if (self.current + 1 >= self.tokens.len) {
+            return self.tokens[self.tokens.len - 1];
+        }
+        return self.tokens[self.current + 1];
+    }
+
     fn getBinaryOperator(tokenType: TokenType) ?BinaryOperator {
         return switch (tokenType) {
             .Plus => .Plus,
             .Minus => .Minus,
             .Star => .Multiply,
             .Slash => .Divide,
+            .Caret => .Exponent,
             .DoubleEqual => .Equal,
             .NotEqual => .NotEqual,
             .LessThan => .LessThan,
@@ -250,7 +413,6 @@ pub const Parser = struct {
             .GreaterThanOrEqual => .GreaterThanOrEqual,
             // .DoubleAmpersand => .LogicalAnd,
             // .DoublePipe => .LogicalOr,
-            .Caret => .Exponent,
             else => null,
         };
     }
@@ -260,19 +422,14 @@ pub const Parser = struct {
             // .DoubleAmpersand => .Logical,
             // .DoublePipe => .Logical,
 
-            .DoubleEqual => .Equality,
-            .NotEqual => .Equality,
+            .DoubleEqual, .NotEqual => .Equality,
 
-            .LessThan => .Comparison,
-            .GreaterThan => .Comparison,
-            .LessThanOrEqual => .Comparison,
-            .GreaterThanOrEqual => .Comparison,
+            .LessThan, .GreaterThan, .LessThanOrEqual, .GreaterThanOrEqual => .Comparison,
 
             .Plus => .Sum,
             .Minus => .Sum,
 
-            .Star => .Product,
-            .Slash => .Product,
+            .Star, .Slash, .Cross => .Product,
 
             .Caret => .Exponent,
 
