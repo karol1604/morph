@@ -1,18 +1,19 @@
 const std = @import("std");
 const checkedAst = @import("checked-ast.zig");
 const ast = @import("ast.zig");
-const span = @import("span.zig");
+const span_ = @import("span.zig");
 const context = @import("context.zig");
 
 const CheckedExpr = checkedAst.CheckedExpr;
 const CheckedExprData = checkedAst.CheckedExprData;
 const TypeId = checkedAst.TypeId;
 const TypeArena = checkedAst.TypeArena;
-const Span = span.Span;
+const Span = span_.Span;
 
 const UNIT_TYPE_ID: TypeId = 0;
 const INT_TYPE_ID: TypeId = 1;
 const BOOL_TYPE_ID: TypeId = 2;
+const ERROR_TYPE_ID: TypeId = 3;
 
 const Scope = struct {
     parent: ?*Scope,
@@ -92,28 +93,37 @@ pub const Checker = struct {
 
     fn checkExpr(self: *Checker, expr: *const ast.Expr, typeHint: ?TypeId) anyerror!*CheckedExpr {
         switch (expr.*.kind) {
-            .IntLiteral => |int| return try self.typedExpr(.{ .IntLiteral = int }, INT_TYPE_ID, typeHint),
-            .BoolLiteral => |b| return try self.typedExpr(.{ .BoolLiteral = b }, BOOL_TYPE_ID, typeHint),
+            .IntLiteral => |int| return try self.typedExpr(.{ .IntLiteral = int }, INT_TYPE_ID, typeHint, expr.span),
+            .BoolLiteral => |b| return try self.typedExpr(.{ .BoolLiteral = b }, BOOL_TYPE_ID, typeHint, expr.span),
             .Unary => return try self.checkUnaryExpr(expr, typeHint),
             .Binary => return try self.checkBinaryExpr(expr, typeHint),
             .VariableDecl => return try self.checkVariableDecl(expr),
-            .Identifier => return try self.checkIdentifier(expr),
+            .Identifier => return try self.checkIdentifier(expr, typeHint),
             else => return error.Unimplemented,
         }
     }
 
-    fn checkIdentifier(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
+    fn checkIdentifier(self: *Checker, expr: *const ast.Expr, typeHint: ?TypeId) !*CheckedExpr {
         const identName = expr.kind.Identifier;
         const symbol = self.currentScope().lookupSymbol(identName);
         if (symbol == null) {
-            std.debug.print("Undeclared variable `{s}`\n", .{identName});
-            return error.UndeclaredVariable;
+            self.ctx.reportError(expr.span, "undeclared variable `{s}`", .{identName});
+
+            // Return a dummy expr of error type
+            return try self.typedExpr(
+                .{ .Identifier = identName },
+                ERROR_TYPE_ID,
+                null,
+                expr.span,
+            );
         }
 
+        std.debug.print("Identifier `{s}` resolved to type ID {d}\n", .{ identName, symbol.?.typeId });
         return try self.typedExpr(
             .{ .Identifier = identName },
             symbol.?.typeId,
-            null,
+            typeHint,
+            expr.span,
         );
     }
 
@@ -122,36 +132,64 @@ pub const Checker = struct {
         var expectedTypeId: ?TypeId = null;
 
         if (self.typeArena.get(.{ .Named = varDecl.name })) |_| {
-            std.debug.print("Variable {s} shadows type\n", .{varDecl.name});
-            return error.VariableShadowsType;
+            self.ctx.reportError(
+                expr.span,
+                "variable `{s}` shadows type name",
+                .{varDecl.name},
+            );
         }
 
         if (varDecl.type) |typeName| {
-            if (self.typeArena.get(.{ .Named = typeName }) == null) {
-                std.debug.print("Unknown type `{s}`\n", .{typeName});
-                return error.UnknownType;
+            if (self.typeArena.get(.{ .Named = typeName })) |tid| {
+                expectedTypeId = tid;
+            } else {
+                self.ctx.reportError(
+                    expr.span,
+                    "unknown type `{s}`",
+                    .{typeName},
+                );
+                expectedTypeId = ERROR_TYPE_ID;
             }
-
-            expectedTypeId = self.typeArena.get(.{ .Named = typeName }).?;
         }
 
         const valueChecked = try self.checkExpr(varDecl.value, expectedTypeId);
-        try self.declareVariable(varDecl.name, valueChecked.typeId);
+
+        var resultType: TypeId = UNIT_TYPE_ID;
+        if (self.typeArena.get(.{ .Named = varDecl.name })) |_| {
+            self.ctx.reportError(
+                expr.span,
+                "variable `{s}` shadows type name",
+                .{varDecl.name},
+            );
+            resultType = ERROR_TYPE_ID;
+        } else {
+            self.declareVariable(varDecl.name, valueChecked.typeId) catch |err| switch (err) {
+                error.VariableAlreadyDeclared => {
+                    self.ctx.reportError(
+                        expr.span,
+                        "variable `{s}` already declared in this scope",
+                        .{varDecl.name},
+                    );
+                    resultType = ERROR_TYPE_ID;
+                },
+                else => return err,
+            };
+        }
 
         return try self.typedExpr(
             .{ .VariableDecl = .{
                 .name = varDecl.name,
                 .value = valueChecked,
             } },
-            UNIT_TYPE_ID,
+            resultType,
             null,
+            expr.span,
         );
     }
 
     fn declareVariable(self: *Checker, name: []const u8, typeId: TypeId) !void {
         const scope = self.currentScope();
         if (scope.lookupSymbol(name)) |_| {
-            std.debug.print("Variable `{s}` already declared in this scope\n", .{name});
             return error.VariableAlreadyDeclared;
         }
 
@@ -169,6 +207,7 @@ pub const Checker = struct {
         switch (binary.operator) {
             .Plus, .Minus, .Multiply, .Divide, .Exponent => {
                 const leftChecked = try self.checkExpr(binary.left, INT_TYPE_ID);
+                std.debug.print("Left operand type ID: {d}\n", .{leftChecked.typeId});
                 const rightChecked = try self.checkExpr(binary.right, INT_TYPE_ID);
 
                 return try self.typedExpr(
@@ -179,6 +218,7 @@ pub const Checker = struct {
                     } },
                     INT_TYPE_ID,
                     typeHint,
+                    expr.span,
                 );
             },
             .LessThan, .GreaterThan, .LessThanOrEqual, .GreaterThanOrEqual => {
@@ -193,6 +233,7 @@ pub const Checker = struct {
                     } },
                     BOOL_TYPE_ID,
                     typeHint,
+                    expr.span,
                 );
             },
             .Equal, .NotEqual => {
@@ -207,6 +248,7 @@ pub const Checker = struct {
                     } },
                     BOOL_TYPE_ID,
                     typeHint,
+                    expr.span,
                 );
             },
             .LogicalOr, .LogicalAnd => {
@@ -221,6 +263,7 @@ pub const Checker = struct {
                     } },
                     BOOL_TYPE_ID,
                     typeHint,
+                    expr.span,
                 );
             },
             .TypeProduct => return error.IdkLol,
@@ -239,12 +282,27 @@ pub const Checker = struct {
                     } },
                     INT_TYPE_ID,
                     typeHint,
+                    expr.span,
                 );
             },
             .Not => {
                 const rightChecked = try self.checkExpr(unary.right, BOOL_TYPE_ID);
                 if (rightChecked.typeId != BOOL_TYPE_ID) {
-                    return error.TypeMismatch;
+                    self.ctx.reportError(
+                        expr.span,
+                        "type mismatch: expected `Bool`, got `{s}`",
+                        .{self.typeArena.getTypeName(rightChecked.typeId) orelse "<?>"},
+                    );
+
+                    return try self.typedExpr(
+                        .{ .Unary = .{
+                            .operator = unary.operator,
+                            .right = rightChecked,
+                        } },
+                        ERROR_TYPE_ID,
+                        typeHint,
+                        expr.span,
+                    );
                 }
                 return try self.typedExpr(
                     .{ .Unary = .{
@@ -253,6 +311,7 @@ pub const Checker = struct {
                     } },
                     BOOL_TYPE_ID,
                     typeHint,
+                    expr.span,
                 );
             },
         }
@@ -263,13 +322,22 @@ pub const Checker = struct {
         data: CheckedExprData,
         resultType: TypeId,
         typeHint: ?TypeId,
+        span: Span,
     ) !*CheckedExpr {
         if (typeHint != null and resultType != typeHint) {
-            std.debug.print("Type mismatch: expected type `{?s}`, got `{?s}` at [SPAN]\n", .{
-                self.typeArena.getTypeName(typeHint.?),
-                self.typeArena.getTypeName(resultType),
+            self.ctx.reportError(
+                span,
+                "type mismatch: expected `{s}`, got `{s}`",
+                .{
+                    self.typeArena.getTypeName(typeHint.?) orelse "<?>",
+                    self.typeArena.getTypeName(resultType) orelse "<?>",
+                },
+            );
+            // swallow the mismatch, but mark expression as error-typed
+            return try self.heapAlloc(CheckedExpr, .{
+                .typeId = ERROR_TYPE_ID,
+                .data = data,
             });
-            return error.TypeMismatch;
         }
         return try self.heapAlloc(CheckedExpr, .{
             .typeId = resultType,
