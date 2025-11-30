@@ -12,6 +12,8 @@ pub const TokenType = union(enum) {
     KwTrue,
     KwFalse,
     KwLet,
+    KwAnd,
+    KwOr,
 
     RightArrow,
     DoubleRightArrow,
@@ -54,6 +56,8 @@ pub const TokenType = union(enum) {
             .KwTrue => try writer.print("true", .{}),
             .KwFalse => try writer.print("false", .{}),
             .KwLet => try writer.print("let", .{}),
+            .KwAnd => try writer.print("and", .{}),
+            .KwOr => try writer.print("or", .{}),
 
             .RightArrow => try writer.print("->", .{}),
             .DoubleRightArrow => try writer.print("=>", .{}),
@@ -110,6 +114,8 @@ pub const Token = struct {
             .KwTrue => try writer.print("KW_TRUE", .{}),
             .KwFalse => try writer.print("KW_FALSE", .{}),
             .KwLet => try writer.print("KW_LET", .{}),
+            .KwAnd => try writer.print("KW_AND", .{}),
+            .KwOr => try writer.print("KW_OR", .{}),
 
             .Semicolon => try writer.print("TOK_SEMICOLON", .{}),
             .Comma => try writer.print("TOK_COMMA", .{}),
@@ -147,4 +153,6 @@ pub const Keywords = std.StaticStringMap(TokenType).initComptime(.{
     .{ "true", .KwTrue },
     .{ "false", .KwFalse },
     .{ "let", .KwLet },
+    .{ "and", .KwAnd },
+    .{ "or", .KwOr },
 });

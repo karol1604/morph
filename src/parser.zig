@@ -29,7 +29,7 @@ pub const Parser = struct {
         };
     }
 
-    pub fn heapAlloc(self: *const Parser, comptime T: type, value: T) !*T {
+    fn heapAlloc(self: *const Parser, comptime T: type, value: T) !*T {
         const ptr = try self.ctx.allocator.create(T);
         ptr.* = value;
         return ptr;
@@ -411,23 +411,21 @@ pub const Parser = struct {
             .GreaterThan => .GreaterThan,
             .LessThanOrEqual => .LessThanOrEqual,
             .GreaterThanOrEqual => .GreaterThanOrEqual,
-            // .DoubleAmpersand => .LogicalAnd,
-            // .DoublePipe => .LogicalOr,
+            .KwAnd => .LogicalAnd,
+            .KwOr => .LogicalOr,
             else => null,
         };
     }
 
     fn getTokenPrec(_: *Parser, tokenType: TokenType) Precedence {
         return switch (tokenType) {
-            // .DoubleAmpersand => .Logical,
-            // .DoublePipe => .Logical,
+            .KwAnd, .KwOr => .Logical,
 
             .DoubleEqual, .NotEqual => .Equality,
 
             .LessThan, .GreaterThan, .LessThanOrEqual, .GreaterThanOrEqual => .Comparison,
 
-            .Plus => .Sum,
-            .Minus => .Sum,
+            .Plus, .Minus => .Sum,
 
             .Star, .Slash, .Cross => .Product,
 

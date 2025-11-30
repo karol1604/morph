@@ -99,8 +99,8 @@ fn prettyPrintRec(
                 .GreaterThan => ">",
                 .LessThanOrEqual => "<=",
                 .GreaterThanOrEqual => ">=",
-                .LogicalAnd => "&&",
-                .LogicalOr => "||",
+                .LogicalAnd => "and",
+                .LogicalOr => "or",
             };
             std.debug.print("Binary {s}\n", .{opStr});
 

@@ -2,6 +2,7 @@ const std = @import("std");
 const context = @import("context.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
+const checker = @import("checker.zig");
 const parserTests = @import("tests/parser.zig");
 const utils = @import("utils.zig");
 
@@ -12,7 +13,7 @@ pub fn main() !void {
     // const source = "let x ∈ Vec3 = { let a = 1; };";
     // const source = "let a = 1; let x ∈ Vec3 = { let a = 1; a == 1; x + 1 / 2; a };";
     // const source = "add : (A × ℤ)^4 -> Float";
-    const source = "add(1, 2)";
+    const source = "let x = true; a";
 
     // add : ℕ × ℕ -> ℕ;
     // add(x, y) => x + y;
@@ -36,6 +37,10 @@ pub fn main() !void {
         std.debug.print("- ", .{});
         utils.prettyPrintExpression(expr.*);
     }
+
+    var check = try checker.Checker.init(&ctx, exprs);
+    const checkedExprs = try check.check();
+    std.debug.print("Checked Expression(s): {any}\n", .{checkedExprs[1]});
 }
 
 test "Tests" {
