@@ -11,11 +11,11 @@ const CompilerContext = context.CompilerContext;
 fn printDiagnostics(ctx: *CompilerContext) void {
     for (ctx.diagnostics.items) |diag| {
         std.debug.print(
-            "<input>:{d}:{d}: {s}: {s}\n",
+            "<input>:{d}:{d}: {t}: {s}\n",
             .{
                 diag.span.start.line,
                 diag.span.start.col,
-                @tagName(diag.severity),
+                diag.severity,
                 diag.message,
             },
         );
@@ -39,6 +39,7 @@ fn printSnippet(source: []const u8, span: Span) void {
     std.debug.print("    ", .{});
     // spaces before the caret
     var i: usize = 0;
+    // std.debug.print("num: {d}\n", .{line_start});
     while (i < span.start.col - 1 - line_start) : (i += 1) {
         std.debug.print(" ", .{});
     }
@@ -56,8 +57,8 @@ pub fn main() !void {
     // const source = "let ℕ = a != true;";
     // const source = "let x ∈ Vec3 = { let a = 1; };";
     // const source = "let a = 1; let x ∈ Vec3 = { let a = 1; a == 1; x + 1 / 2; a };";
-    // const source = "add : (A × ℤ)^4 -> Float";
-    const source = "let x ∈ Int = 1 <= true and !false;";
+    const source = "add1 : Int × Int -> Bool; add2 : Int × Int -> Bool; add1; add2";
+    // const source = "let x ∈ Bool = 1 <= 1 and !false; x;";
 
     // add : ℕ × ℕ -> ℕ;
     // add(x, y) => x + y;

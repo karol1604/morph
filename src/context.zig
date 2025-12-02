@@ -1,5 +1,5 @@
 const std = @import("std");
-const span_ = @import("span.zig");
+const Span = @import("span.zig").Span;
 const diag = @import("diagnostic.zig");
 
 pub const CompilerContext = struct {
@@ -24,7 +24,7 @@ pub const CompilerContext = struct {
 
     pub fn reportError(
         self: *CompilerContext,
-        span: span_.Span,
+        span: Span,
         comptime fmt: []const u8,
         args: anytype,
     ) void {

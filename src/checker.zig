@@ -1,5 +1,5 @@
 const std = @import("std");
-const checkedAst = @import("checked-ast.zig");
+const checkedAst = @import("checked_ast.zig");
 const ast = @import("ast.zig");
 const span_ = @import("span.zig");
 const context = @import("context.zig");
@@ -7,7 +7,7 @@ const context = @import("context.zig");
 const CheckedExpr = checkedAst.CheckedExpr;
 const CheckedExprData = checkedAst.CheckedExprData;
 const TypeId = checkedAst.TypeId;
-const TypeArena = checkedAst.TypeArena;
+const TypeStore = checkedAst.TypeStore;
 const Span = span_.Span;
 
 const UNIT_TYPE_ID: TypeId = 0;
@@ -58,7 +58,7 @@ pub const Checker = struct {
     exprs: []*ast.Expr,
     scopes: std.ArrayList(*Scope),
     globalScope: *Scope,
-    typeArena: TypeArena,
+    typeStore: TypeStore,
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
         const globalScope = try ctx.allocator.create(Scope);
@@ -67,17 +67,18 @@ pub const Checker = struct {
         var scopes: std.ArrayList(*Scope) = .empty;
         try scopes.append(ctx.allocator, globalScope);
 
-        var typeArena = TypeArena.init(ctx.allocator);
+        var typeArena = TypeStore.init(ctx.allocator);
         _ = try typeArena.addType(.{ .Named = "Unit" });
         _ = try typeArena.addType(.{ .Named = "Int" });
         _ = try typeArena.addType(.{ .Named = "Bool" });
+        _ = try typeArena.addType(.{ .Named = "ErrorType" });
 
         return Checker{
             .ctx = ctx,
             .exprs = exprs,
             .scopes = scopes,
             .globalScope = globalScope,
-            .typeArena = typeArena,
+            .typeStore = typeArena,
         };
     }
 
@@ -99,8 +100,132 @@ pub const Checker = struct {
             .Binary => return try self.checkBinaryExpr(expr, typeHint),
             .VariableDecl => return try self.checkVariableDecl(expr),
             .Identifier => return try self.checkIdentifier(expr, typeHint),
-            else => return error.Unimplemented,
+            .Block => return try self.checkBlock(expr, typeHint),
+            .FunctionTypeSignature => return try self.checkFunctionTypeSignature(expr),
+            // else => return error.Unimplemented,
         }
+    }
+
+    fn checkFunctionTypeSignature(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
+        const funcSig = expr.kind.FunctionTypeSignature;
+
+        const domainId = try self.resolveTypeExpr(funcSig.domain);
+        const codomainId = try self.resolveTypeExpr(funcSig.codomain);
+
+        std.debug.print("domainId: {d}, codomainId: {d}\n", .{ domainId, codomainId });
+
+        const funcTypeId = try self.typeStore.addType(
+            .{ .Function = .{
+                .domain = domainId,
+                .codomain = codomainId,
+            } },
+        );
+
+        std.debug.print("Function `{s}` has typeId `{d}` with {any}\n", .{ funcSig.name, funcTypeId, self.typeStore.items.items[funcTypeId].Function });
+
+        const funcSym = checkedAst.Symbol{
+            .name = funcSig.name,
+            .typeId = funcTypeId,
+            .kind = .Function,
+        };
+
+        try self.currentScope().defineSymbol(funcSym);
+
+        return try self.typedExpr(
+            .{
+                .FunctionTypeSignature = .{
+                    .name = funcSig.name,
+                    .domain = try self.typedExpr(
+                        .{ .Identifier = "DOMAIN" }, // FIXME: add proper type expr support
+                        domainId,
+                        null,
+                        funcSig.domain.span,
+                    ),
+                    .codomain = try self.typedExpr(
+                        .{ .Identifier = "CODOMAIN" }, // FIXME: add proper type expr support
+                        codomainId,
+                        null,
+                        funcSig.codomain.span,
+                    ),
+                },
+            },
+            UNIT_TYPE_ID,
+            null,
+            expr.span,
+        );
+    }
+
+    fn resolveTypeExpr(self: *Checker, expr: *const ast.Expr) !TypeId {
+        switch (expr.kind) {
+            .Identifier => |typeName| {
+                if (self.typeStore.get(.{ .Named = typeName })) |tid| {
+                    return tid;
+                } else {
+                    self.ctx.reportError(
+                        expr.span,
+                        "unknown type `{s}`",
+                        .{typeName},
+                    );
+                    return ERROR_TYPE_ID;
+                }
+            },
+            .Binary => |bin| switch (bin.operator) {
+                .TypeProduct => {
+                    const leftId = try self.resolveTypeExpr(bin.left);
+                    const rightId = try self.resolveTypeExpr(bin.right);
+                    return self.typeStore.addType(
+                        .{ .Product = .{
+                            .left = leftId,
+                            .right = rightId,
+                        } },
+                    );
+                },
+                .Exponent => return error.Unimplemented,
+                else => {
+                    self.ctx.reportError(
+                        expr.span,
+                        "invalid operator in type expression",
+                        .{},
+                    );
+                    return ERROR_TYPE_ID;
+                },
+            },
+            else => {
+                self.ctx.reportError(
+                    expr.span,
+                    "invalid type expression",
+                    .{},
+                );
+                return ERROR_TYPE_ID;
+            },
+        }
+    }
+
+    fn checkBlock(self: *Checker, expr: *const ast.Expr, typeHint: ?TypeId) !*CheckedExpr {
+        const block = expr.kind.Block;
+        try self.enterNewScope();
+
+        var checkedStmts = try self.ctx.allocator.alloc(*CheckedExpr, block.stmts.len);
+        for (block.stmts, 0..) |stmt, idx| {
+            checkedStmts[idx] = try self.checkExpr(stmt, null);
+        }
+
+        var tailChecked: ?*CheckedExpr = null;
+        if (block.tail) |tailExpr| {
+            tailChecked = try self.checkExpr(tailExpr, typeHint);
+        }
+
+        self.exitScope();
+
+        return try self.typedExpr(
+            .{ .Block = .{
+                .stmts = checkedStmts,
+                .tail = tailChecked,
+            } },
+            if (tailChecked) |t| t.typeId else UNIT_TYPE_ID,
+            typeHint,
+            expr.span,
+        );
     }
 
     fn checkIdentifier(self: *Checker, expr: *const ast.Expr, typeHint: ?TypeId) !*CheckedExpr {
@@ -118,7 +243,7 @@ pub const Checker = struct {
             );
         }
 
-        std.debug.print("Identifier `{s}` resolved to type ID {d}\n", .{ identName, symbol.?.typeId });
+        std.debug.print("Identifier `{s}` resolved to `{s}`\n", .{ identName, self.typeStore.formatTypeName(symbol.?.typeId) });
         return try self.typedExpr(
             .{ .Identifier = identName },
             symbol.?.typeId,
@@ -131,7 +256,7 @@ pub const Checker = struct {
         const varDecl = expr.kind.VariableDecl;
         var expectedTypeId: ?TypeId = null;
 
-        if (self.typeArena.get(.{ .Named = varDecl.name })) |_| {
+        if (self.typeStore.get(.{ .Named = varDecl.name })) |_| {
             self.ctx.reportError(
                 expr.span,
                 "variable `{s}` shadows type name",
@@ -140,7 +265,7 @@ pub const Checker = struct {
         }
 
         if (varDecl.type) |typeName| {
-            if (self.typeArena.get(.{ .Named = typeName })) |tid| {
+            if (self.typeStore.get(.{ .Named = typeName })) |tid| {
                 expectedTypeId = tid;
             } else {
                 self.ctx.reportError(
@@ -155,7 +280,7 @@ pub const Checker = struct {
         const valueChecked = try self.checkExpr(varDecl.value, expectedTypeId);
 
         var resultType: TypeId = UNIT_TYPE_ID;
-        if (self.typeArena.get(.{ .Named = varDecl.name })) |_| {
+        if (self.typeStore.get(.{ .Named = varDecl.name })) |_| {
             self.ctx.reportError(
                 expr.span,
                 "variable `{s}` shadows type name",
@@ -207,7 +332,6 @@ pub const Checker = struct {
         switch (binary.operator) {
             .Plus, .Minus, .Multiply, .Divide, .Exponent => {
                 const leftChecked = try self.checkExpr(binary.left, INT_TYPE_ID);
-                std.debug.print("Left operand type ID: {d}\n", .{leftChecked.typeId});
                 const rightChecked = try self.checkExpr(binary.right, INT_TYPE_ID);
 
                 return try self.typedExpr(
@@ -291,7 +415,7 @@ pub const Checker = struct {
                     self.ctx.reportError(
                         expr.span,
                         "type mismatch: expected `Bool`, got `{s}`",
-                        .{self.typeArena.getTypeName(rightChecked.typeId) orelse "<?>"},
+                        .{self.typeStore.formatTypeName(rightChecked.typeId)},
                     );
 
                     return try self.typedExpr(
@@ -329,8 +453,8 @@ pub const Checker = struct {
                 span,
                 "type mismatch: expected `{s}`, got `{s}`",
                 .{
-                    self.typeArena.getTypeName(typeHint.?) orelse "<?>",
-                    self.typeArena.getTypeName(resultType) orelse "<?>",
+                    self.typeStore.formatTypeName(typeHint.?),
+                    self.typeStore.formatTypeName(resultType),
                 },
             );
             // swallow the mismatch, but mark expression as error-typed
@@ -347,6 +471,18 @@ pub const Checker = struct {
 
     fn currentScope(self: *const Checker) *Scope {
         return self.scopes.items[self.scopes.items.len - 1];
+    }
+
+    fn enterNewScope(self: *Checker) !void {
+        const newScope = try self.ctx.allocator.create(Scope);
+        newScope.* = Scope.init(self.ctx.allocator, self.currentScope());
+        try self.scopes.append(self.ctx.allocator, newScope);
+    }
+
+    fn exitScope(self: *Checker) void {
+        const scope = self.scopes.items[self.scopes.items.len - 1];
+        scope.deinit();
+        _ = self.scopes.pop();
     }
 
     fn heapAlloc(self: *const Checker, comptime T: type, value: T) !*T {
