@@ -139,6 +139,25 @@ fn prettyPrintRec(
             // Child 2: Codomain (Output) - Last
             prettyPrintRec(sig.codomain.*.kind, depth + 1, treeLines, true);
         },
+        .FunctionDef => |def| {
+            std.debug.print("FunctionDef: {s}\n", .{def.name});
+
+            treeLines[depth] = !isLast;
+
+            // Child 1: Body - Last
+            prettyPrintRec(def.body.*.kind, depth + 1, treeLines, true);
+        },
+        .FunctionCall => |call| {
+            std.debug.print("FunctionCall: {s}\n", .{call.callee});
+
+            treeLines[depth] = !isLast;
+
+            const arg_count = call.args.len;
+            for (call.args, 0..) |arg, i| {
+                const is_last_child = (i == arg_count - 1);
+                prettyPrintRec(arg.kind, depth + 1, treeLines, is_last_child);
+            }
+        },
         // else => {},
     }
 }

@@ -62,15 +62,56 @@ pub const Parser = struct {
             .Colon => return try self.parseFunctionTypeSignature(),
             .LParen => {
                 if (self.isFunctionDefinition()) {
-                    return error.FunctionDefNotSupported;
+                    std.debug.print("Parsing function definition...\n", .{});
+                    return try self.parseFunctionDefinition();
+                    // return error.FunctionDefNotSupported;
                 }
-                return error.FunctionCallNotSupported;
+                return try self.parseExpression(.Lowest); // function call
             },
             else => return try self.parseExpression(.Lowest),
         }
     }
 
-    fn isFunctionDefinition(self: *Parser) bool {
+    fn parseFunctionDefinition(self: *Parser) !*Expr {
+        const name = try self.parseIdentifier(); // consumes the name
+        _ = try self.expect(.LParen);
+
+        var params: std.ArrayList([]const u8) = .empty;
+
+        while (self.currentToken().kind != .RParen) {
+            const param = try self.parseIdentifier();
+            if (std.meta.activeTag(param.kind) != .Identifier) {
+                return error.ExpectedIdentifier;
+            }
+            try params.append(self.ctx.allocator, param.kind.Identifier);
+
+            if (self.currentToken().kind == .Comma) {
+                self.advance(); // consume comma
+            } else {
+                break;
+            }
+        }
+
+        _ = try self.expect(.RParen);
+        _ = try self.expect(.DoubleRightArrow);
+
+        const body = try self.parseExpression(.Lowest);
+        if (std.meta.activeTag(body.kind) != .Block) {
+            // require semicolon if body is not a block
+            _ = try self.expect(.Semicolon);
+        }
+
+        return self.heapAlloc(Expr, Expr{
+            .kind = .{ .FunctionDef = .{
+                .name = name.kind.Identifier,
+                .params = try params.toOwnedSlice(self.ctx.allocator),
+                .body = body,
+            } },
+            .span = Span.join(name.span, body.span),
+        });
+    }
+
+    fn isFunctionDefinition(self: *const Parser) bool {
         var offset: usize = 1;
 
         if (self.current + offset >= self.tokens.len) return false;
@@ -98,7 +139,7 @@ pub const Parser = struct {
     pub fn parseExpression(self: *Parser, prec: Precedence) anyerror!*Expr {
         var expr = switch (self.currentToken().kind) {
             .IntLiteral => try self.parseIntLiteral(),
-            .Identifier => try self.parseIdentifier(),
+            .Identifier => try self.parseIdentifierOrFunctionCall(),
             .KwTrue, .KwFalse => try self.parseBoolLiteral(),
             .KwLet => try self.parseVariableDecl(),
             .Plus, .Minus, .Bang => try self.parseUnaryExpression(),
@@ -328,11 +369,53 @@ pub const Parser = struct {
 
     fn parseIdentifier(self: *Parser) !*Expr {
         const start_span = self.currentToken().span;
-        const ident = try self.expectIdent(); // consumes the ident
+        const name = try self.expectIdent(); // consumes the ident
 
         return self.heapAlloc(Expr, Expr{
-            .kind = .{ .Identifier = ident },
+            .kind = .{ .Identifier = name },
             .span = Span.join(start_span, start_span),
+        });
+    }
+
+    fn parseIdentifierOrFunctionCall(self: *Parser) !*Expr {
+        const start_span = self.currentToken().span;
+        const name = try self.expectIdent(); // consumes the ident
+
+        if (self.currentToken().kind == .LParen) {
+            return try self.parseFunctionCall(name, start_span);
+        }
+
+        return self.heapAlloc(Expr, Expr{
+            .kind = .{ .Identifier = name },
+            .span = Span.join(start_span, start_span),
+        });
+    }
+
+    fn parseFunctionCall(self: *Parser, callee: []const u8, start_span: Span) !*Expr {
+        self.advance(); // consume the left paren
+
+        var args: std.ArrayList(*const Expr) = .empty;
+
+        while (self.currentToken().kind != .RParen and self.currentToken().kind != .Eof) {
+            const arg = try self.parseExpression(.Lowest);
+            try args.append(self.ctx.allocator, arg);
+
+            if (self.currentToken().kind == .Comma) {
+                self.advance(); // consume comma
+            } else {
+                break;
+            }
+        }
+
+        const end_span = self.currentToken().span;
+        _ = try self.expect(.RParen);
+
+        return self.heapAlloc(Expr, Expr{
+            .kind = .{ .FunctionCall = .{
+                .callee = callee,
+                .args = try args.toOwnedSlice(self.ctx.allocator),
+            } },
+            .span = Span.join(start_span, end_span),
         });
     }
 

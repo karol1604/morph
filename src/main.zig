@@ -19,36 +19,67 @@ fn printDiagnostics(ctx: *CompilerContext) void {
                 diag.message,
             },
         );
-        printSnippet(ctx.source, diag.span);
+        printSnippet(ctx.source, diag.span, 2);
     }
 }
 
-fn printSnippet(source: []const u8, span: Span) void {
-    // 1. Find line start and end in `source` using span.start.offset
-    var line_start: usize = span.start.offset;
+fn printSnippet(source: []const u8, span: Span, context_lines: usize) void {
+    var line_start = span.start.offset;
     while (line_start > 0 and source[line_start - 1] != '\n') : (line_start -= 1) {}
 
-    var line_end: usize = span.start.offset;
+    var line_end = span.start.offset;
     while (line_end < source.len and source[line_end] != '\n') : (line_end += 1) {}
 
-    const line = source[line_start..line_end];
-    std.debug.print("    {s}\n", .{line});
+    var ctx_start = line_start;
+    var lines_found: usize = 0;
+    while (lines_found < context_lines and ctx_start > 0) {
+        ctx_start -= 1;
+        if (source[ctx_start] == '\n') {
+            lines_found += 1;
+        }
+    }
+    if (source[ctx_start] == '\n') ctx_start += 1;
 
-    // 2. Underline the span
+    if (ctx_start < line_start) {
+        var it = std.mem.splitScalar(u8, source[ctx_start..line_start], '\n');
+        while (it.next()) |ctx_line| {
+            if (ctx_line.len > 0) std.debug.print("    {s}\n", .{ctx_line});
+        }
+    }
+
+    const error_line = source[line_start..line_end];
+    std.debug.print("    {s}\n", .{error_line});
+
     const underline_len = @max(1, span.end.col - span.start.col);
     std.debug.print("    ", .{});
-    // spaces before the caret
+
+    const padding = span.start.offset - line_start;
+
     var i: usize = 0;
-    // std.debug.print("num: {d}\n", .{line_start});
-    while (i < span.start.col - 1 - line_start) : (i += 1) {
+    while (i < padding) : (i += 1) {
         std.debug.print(" ", .{});
     }
-    // carets
     i = 0;
     while (i < underline_len) : (i += 1) {
         std.debug.print("^", .{});
     }
     std.debug.print("\n", .{});
+
+    var ctx_idx = line_end;
+    if (ctx_idx < source.len) ctx_idx += 1; // Skip the newline of the error line itself
+
+    lines_found = 0;
+    while (lines_found < context_lines and ctx_idx < source.len) {
+        // Find end of this specific context line
+        var current_ctx_end = ctx_idx;
+        while (current_ctx_end < source.len and source[current_ctx_end] != '\n') : (current_ctx_end += 1) {}
+
+        const ctx_line = source[ctx_idx..current_ctx_end];
+        std.debug.print("    {s}\n", .{ctx_line});
+
+        ctx_idx = current_ctx_end + 1; // Move past the newline
+        lines_found += 1;
+    }
 }
 
 pub fn main() !void {
@@ -57,8 +88,14 @@ pub fn main() !void {
     // const source = "let ℕ = a != true;";
     // const source = "let x ∈ Vec3 = { let a = 1; };";
     // const source = "let a = 1; let x ∈ Vec3 = { let a = 1; a == 1; x + 1 / 2; a };";
-    const source = "add1 : Int × Int -> Bool; add2 : Int × Int -> Bool; add1; add2";
+    // const source = "add1 : Int × Int -> Bool; add2 : Int × Int -> Bool; add1; add2";
     // const source = "let x ∈ Bool = 1 <= 1 and !false; x;";
+    // const source =
+    //     \\add: Int × Int -> Int;
+    //     \\let Int = 1;
+    //     \\add(x, y) => x + y;;
+    // ;
+    const source = @embedFile("tests/test.mp");
 
     // add : ℕ × ℕ -> ℕ;
     // add(x, y) => x + y;

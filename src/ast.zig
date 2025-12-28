@@ -38,6 +38,17 @@ pub const ExprKind = union(enum) {
         domain: *const Expr,
         codomain: *const Expr,
     },
+
+    FunctionDef: struct {
+        name: []const u8,
+        params: [][]const u8,
+        body: *const Expr,
+    },
+
+    FunctionCall: struct {
+        callee: []const u8,
+        args: []const *const Expr,
+    },
 };
 
 pub const UnaryOperator = union(enum) {
