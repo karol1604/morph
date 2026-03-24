@@ -2,7 +2,7 @@
 _morph_ is my (n+1)-th attempt at making a statically typed, compiled language. Let's hope i at least get to something this time...
 
 ## Syntax
-My goal with the syntax of _morph_ is for it to somewhat resemble mathematical writing. Here's what an example file would look like:
+My goal with the syntax of _morph_ is for it to somewhat resemble mathematical writing. Here's what an example file would look like (wip):
 
 ```morph
 module Physics;

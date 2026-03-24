@@ -1,4 +1,5 @@
 let a = 2;
+
 add: Int × Bool -> Int;
 add(x, y) => {
     y == true;
@@ -6,4 +7,4 @@ add(x, y) => {
 };
 
 let b = add(4, false);
-true == b;
+2 == b;
