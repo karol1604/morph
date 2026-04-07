@@ -6,7 +6,7 @@ const context = @import("context.zig");
 const type_store = @import("type_store.zig");
 
 const CheckedExpr = cheked_ast.CheckedExpr;
-const CheckedExprData = cheked_ast.CheckedExprData;
+const CheckedExprData = cheked_ast.CheckedExprKind;
 const TypeId = type_store.TypeId;
 const TypeStore = type_store.TypeStore;
 const Span = span_.Span;
@@ -597,12 +597,12 @@ pub const Checker = struct {
             // swallow the mismatch, but mark expression as error-typed
             return try self.heapAlloc(CheckedExpr, .{
                 .typeId = ERROR_TYPE_ID,
-                .data = data,
+                .kind = data,
             });
         }
         return try self.heapAlloc(CheckedExpr, .{
             .typeId = resultType,
-            .data = data,
+            .kind = data,
         });
     }
 

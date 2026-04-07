@@ -4,10 +4,10 @@ const TypeId = @import("type_store.zig").TypeId;
 
 pub const CheckedExpr = struct {
     typeId: TypeId,
-    data: CheckedExprData,
+    kind: CheckedExprKind,
 };
 
-pub const CheckedExprData = union(enum) {
+pub const CheckedExprKind = union(enum) {
     IntLiteral: i64,
     BoolLiteral: bool,
     Identifier: []const u8,

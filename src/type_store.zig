@@ -28,6 +28,24 @@ pub const TypeStore = struct {
         };
     }
 
+    pub fn format(self: TypeStore, writer: *std.io.Writer) !void {
+        for (self.types.items, 0..) |typ, id| {
+            switch (typ) {
+                .Named => try writer.print("{s} [{d}]\n", .{ typ.Named, id }),
+                .Function => |fn_ty| try writer.print("({d} -> {d}) [{d}]\n", .{
+                    fn_ty.domain,
+                    fn_ty.codomain,
+                    id,
+                }),
+                .Product => |prod| try writer.print("({d} × {d}) [{d}]\n", .{
+                    prod.left,
+                    prod.right,
+                    id,
+                }),
+            }
+        }
+    }
+
     /// Adds a type to the store if it doesn't already exist, returning its TypeId.
     pub fn addType(self: *TypeStore, typ: Type) !TypeId {
         if (self.get(typ)) |id| return id;

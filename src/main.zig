@@ -3,6 +3,7 @@ const context = @import("context.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const checker = @import("checker.zig");
+const ir = @import("ir.zig");
 const parserTests = @import("tests/parser.zig");
 const utils = @import("utils.zig");
 const Span = @import("span.zig").Span;
@@ -129,7 +130,22 @@ pub fn main() !void {
         return error.CompilationFailed;
     }
 
-    std.debug.print("Checked Expression(s): {any}\n", .{checkedExprs[0]});
+    var irGen = ir.IRGen.init(&ctx);
+    const instructions = try irGen.generate(checkedExprs);
+
+    std.debug.print("************\n", .{});
+    std.debug.print("Type Store:\n{f}", .{check.typeStore});
+    std.debug.print("************\n", .{});
+    std.debug.print("Checked Expression(s):\n", .{});
+    for (checkedExprs) |expr| {
+        std.debug.print("- ", .{});
+        utils.prettyPrintCheckedExpression(&expr.*);
+    }
+
+    std.debug.print("Generated IR:\n", .{});
+    for (instructions) |instr| {
+        std.debug.print("{f}", .{instr});
+    }
 }
 
 test "Tests" {
