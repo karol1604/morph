@@ -3,7 +3,6 @@ const context = @import("context.zig");
 const checked_ast = @import("checked_ast.zig");
 
 const TempId = usize;
-
 const Opcode = enum {
     Add,
     Sub,
@@ -42,29 +41,45 @@ const Operand = struct {
     }
 };
 
-const Instruction = struct {
-    opcode: Opcode,
-    result: Operand,
-    left: Operand,
-    right: Operand,
+const Instr = union(enum) {
+    Add: struct {
+        result: Operand,
+        left: Operand,
+        right: Operand,
+    },
+    Sub: struct {
+        result: Operand,
+        left: Operand,
+        right: Operand,
+    },
+    Mul: struct {
+        result: Operand,
+        left: Operand,
+        right: Operand,
+    },
+    Div: struct {
+        result: Operand,
+        left: Operand,
+        right: Operand,
+    },
 
-    pub fn format(self: Instruction, writer: *std.io.Writer) !void {
-        return switch (self.opcode) {
-            .Add => try writer.print(
-                "{f} = {f} + {f}\n",
-                .{ self.result, self.left, self.right },
+    pub fn format(self: Instr, writer: *std.io.Writer) !void {
+        return switch (self) {
+            .Add => |a| try writer.print(
+                "{f} := {f} + {f}\n",
+                .{ a.result, a.left, a.right },
             ),
-            .Sub => try writer.print(
-                "{f} = {f} - {f}\n",
-                .{ self.result, self.left, self.right },
+            .Sub => |s| try writer.print(
+                "{f} := {f} - {f}\n",
+                .{ s.result, s.left, s.right },
             ),
-            .Mul => try writer.print(
-                "{f} = {f} * {f}\n",
-                .{ self.result, self.left, self.right },
+            .Mul => |m| try writer.print(
+                "{f} := {f} * {f}\n",
+                .{ m.result, m.left, m.right },
             ),
-            .Div => try writer.print(
-                "{f} = {f} / {f}\n",
-                .{ self.result, self.left, self.right },
+            .Div => |d| try writer.print(
+                "{f} := {f} / {f}\n",
+                .{ d.result, d.left, d.right },
             ),
         };
     }
@@ -72,20 +87,17 @@ const Instruction = struct {
 
 pub const IRGen = struct {
     ctx: *context.CompilerContext,
-    instructions: std.ArrayList(Instruction),
+    instructions: std.ArrayList(Instr) = .empty,
     tempId: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext) IRGen {
         return IRGen{
             .ctx = ctx,
-            .instructions = .empty,
         };
     }
 
-    pub fn generate(self: *IRGen, exprs: []const *checked_ast.CheckedExpr) ![]Instruction {
+    pub fn generate(self: *IRGen, exprs: []const *checked_ast.CheckedExpr) ![]Instr {
         for (exprs) |expr| {
-            // We discard the result operand here because these are top-level expressions
-            // (like "x = 1 + 2;" or just "1 + 2;" acting as a statement)
             _ = try self.genExpr(expr);
         }
         return self.instructions.toOwnedSlice(self.ctx.allocator);
@@ -96,44 +108,54 @@ pub const IRGen = struct {
             .IntLiteral => |v| {
                 return Operand{ .value = .{ .Int = v }, .type = .Literal };
             },
+            .BoolLiteral => |v| {
+                return Operand{ .value = .{ .Bool = v }, .type = .Literal };
+            },
             .Identifier => |name| {
                 // If this is just a variable usage (reading it), return the variable operand
                 return Operand{ .value = .{ .Variable = name }, .type = .Variable };
             },
             .Binary => |bin| {
-                // 1. RECURSE LEFT
-                // This will emit all instructions needed to calculate the left side
-                // and return the storage location (Temp or Literal) of the result.
                 const leftOp = try self.genExpr(bin.left);
-
-                // 2. RECURSE RIGHT
                 const rightOp = try self.genExpr(bin.right);
 
-                // 3. PREPARE DESTINATION
                 const resultTempId = self.makeTemp();
                 const resultOp = Operand{ .value = .{ .Temp = resultTempId }, .type = .Temp };
 
-                // 4. EMIT INSTRUCTION
-                const opcode = switch (bin.operator) {
-                    .Plus => Opcode.Add,
-                    .Minus => Opcode.Sub,
-                    .Multiply => Opcode.Mul,
-                    .Divide => Opcode.Div,
-                    else => return error.UnimplementedOp,
-                };
+                var instr: Instr = undefined;
+                switch (bin.operator) {
+                    .Plus => {
+                        instr = Instr{ .Add = .{
+                            .result = resultOp,
+                            .left = leftOp,
+                            .right = rightOp,
+                        } };
+                    },
+                    .Minus => {
+                        instr = Instr{ .Sub = .{
+                            .result = resultOp,
+                            .left = leftOp,
+                            .right = rightOp,
+                        } };
+                    },
+                    .Divide => {
+                        instr = Instr{ .Div = .{
+                            .result = resultOp,
+                            .left = leftOp,
+                            .right = rightOp,
+                        } };
+                    },
+                    .Multiply => {
+                        instr = Instr{ .Mul = .{
+                            .result = resultOp,
+                            .left = leftOp,
+                            .right = rightOp,
+                        } };
+                    },
+                    else => return error.IRUnimplementedOperator,
+                }
 
-                const instr = Instruction{
-                    .opcode = opcode,
-                    .left = leftOp,
-                    .right = rightOp,
-                    .result = resultOp,
-                };
-
-                // Append to the persistent list
                 try self.instructions.append(self.ctx.allocator, instr);
-
-                // 5. RETURN RESULT OPERAND
-                // We return the temp so the parent expression knows where to find the answer
                 return resultOp;
             },
             else => return error.Unimplemented,
