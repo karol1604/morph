@@ -7,6 +7,12 @@ pub const CheckedExpr = struct {
     kind: CheckedExprKind,
 };
 
+pub const Param = struct {
+    name: []const u8,
+    typeId: TypeId,
+    id: usize, // unique id for this parameter
+};
+
 pub const CheckedExprKind = union(enum) {
     IntLiteral: i64,
     BoolLiteral: bool,
@@ -46,10 +52,13 @@ pub const CheckedExprKind = union(enum) {
     FunctionDecl: struct {
         name: []const u8,
         body: *const CheckedExpr,
+        params: []const Param,
+        id: usize, // unique id for this function
     },
 
     FunctionCall: struct {
         callee: []const u8,
         args: []const *const CheckedExpr,
+        id: usize, // unique id for this function call
     },
 };

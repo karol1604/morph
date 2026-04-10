@@ -131,7 +131,7 @@ pub fn main() !void {
     }
 
     var irGen = ir.IRGen.init(&ctx);
-    const instructions = try irGen.generate(checkedExprs);
+    try irGen.generate(checkedExprs);
 
     std.debug.print("************\n", .{});
     std.debug.print("Type Store:\n{f}", .{check.typeStore});
@@ -142,10 +142,12 @@ pub fn main() !void {
         utils.prettyPrintCheckedExpression(&expr.*);
     }
 
-    std.debug.print("Generated IR({d}):\n", .{instructions.len});
-    for (instructions) |instr| {
-        std.debug.print("{f}", .{instr});
-    }
+    irGen.dump();
+
+    // std.debug.print("Generated IR({d}):\n", .{instructions.len});
+    // for (instructions) |instr| {
+    //     std.debug.print("{f}", .{instr});
+    // }
 }
 
 test "Tests" {

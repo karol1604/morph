@@ -120,10 +120,13 @@ pub const Checker = struct {
                 .{funcCall.callee},
             );
             return try self.typedExpr(
-                .{ .FunctionCall = .{
-                    .callee = funcCall.callee,
-                    .args = &[_]*const CheckedExpr{},
-                } },
+                .{
+                    .FunctionCall = .{
+                        .callee = funcCall.callee,
+                        .args = &[_]*const CheckedExpr{},
+                        .id = 0, // NOTE: id doesn't matter since it's error-typed
+                    },
+                },
                 ERROR_TYPE_ID,
                 typeHint,
                 expr.span,
@@ -149,10 +152,13 @@ pub const Checker = struct {
         }
 
         return try self.typedExpr(
-            .{ .FunctionCall = .{
-                .callee = funcCall.callee,
-                .args = checkedArgs,
-            } },
+            .{
+                .FunctionCall = .{
+                    .callee = funcCall.callee,
+                    .args = checkedArgs,
+                    .id = funcSym.?.id,
+                },
+            },
             codomainId,
             typeHint,
             expr.span,
@@ -162,6 +168,29 @@ pub const Checker = struct {
     fn checkFunctionDef(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
         const funcDef = expr.kind.FunctionDef;
         const funcSig = self.currentScope().lookupSymbol(funcDef.name);
+
+        var checkedParams: std.ArrayList(cheked_ast.Param) = .empty;
+
+        if (funcSig == null) {
+            self.ctx.reportError(
+                expr.span,
+                "function `{s}` has no type signature",
+                .{funcDef.name},
+            );
+            return try self.typedExpr(
+                .{
+                    .FunctionDecl = .{
+                        .name = funcDef.name,
+                        .body = undefined,
+                        .params = undefined,
+                        .id = 0, // NOTE: id doesn't matter since it's error-typed
+                    },
+                },
+                ERROR_TYPE_ID,
+                null,
+                expr.span,
+            );
+        }
 
         const domainId = self.typeStore.types.items[funcSig.?.typeId].Function.domain;
         const codomainId = self.typeStore.types.items[funcSig.?.typeId].Function.codomain;
@@ -178,6 +207,12 @@ pub const Checker = struct {
         for (params, 0..) |paramTypeId, idx| {
             const paramName = funcDef.params[idx];
             const id = self.getNewVarId();
+
+            try checkedParams.append(self.ctx.allocator, .{
+                .name = paramName,
+                .typeId = paramTypeId,
+                .id = id,
+            });
             const paramSym = type_store.Symbol{
                 .name = paramName,
                 .typeId = paramTypeId,
@@ -195,6 +230,8 @@ pub const Checker = struct {
             .{ .FunctionDecl = .{
                 .name = funcDef.name,
                 .body = bodyChecked,
+                .params = try checkedParams.toOwnedSlice(self.ctx.allocator),
+                .id = funcSig.?.id,
             } },
             funcSig.?.typeId,
             null,
