@@ -195,7 +195,7 @@ fn prettyPrintRecCheck(
             std.debug.print("IntLiteral {d} (typeId: {d})\n", .{ val, expr.typeId });
         },
         .Identifier => |name| {
-            std.debug.print("Identifier {s} (typeId: {d})\n", .{ name, expr.typeId });
+            std.debug.print("Identifier {s} (typeId: {d})\n", .{ name.name, expr.typeId });
         },
         .BoolLiteral => |val| {
             std.debug.print("BoolLiteral {s} (typeId: {d})\n", .{ if (val) "true" else "false", expr.typeId });

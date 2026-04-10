@@ -142,7 +142,7 @@ pub fn main() !void {
         utils.prettyPrintCheckedExpression(&expr.*);
     }
 
-    std.debug.print("Generated IR:\n", .{});
+    std.debug.print("Generated IR({d}):\n", .{instructions.len});
     for (instructions) |instr| {
         std.debug.print("{f}", .{instr});
     }

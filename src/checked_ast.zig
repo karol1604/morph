@@ -10,7 +10,10 @@ pub const CheckedExpr = struct {
 pub const CheckedExprKind = union(enum) {
     IntLiteral: i64,
     BoolLiteral: bool,
-    Identifier: []const u8,
+    Identifier: struct {
+        name: []const u8,
+        id: usize, // unique id for this variable
+    },
 
     Unary: struct {
         operator: ast.UnaryOperator,
@@ -26,6 +29,7 @@ pub const CheckedExprKind = union(enum) {
     VariableDecl: struct {
         name: []const u8,
         value: *const CheckedExpr,
+        id: usize, // unique id for this variable
     },
 
     Block: struct {

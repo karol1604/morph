@@ -136,6 +136,7 @@ pub const TypeStore = struct {
 pub const Symbol = struct {
     name: []const u8,
     typeId: TypeId,
+    id: usize, // unique id for this symbol (e.g. variable id or function id)
     kind: enum {
         Variable,
         Function,

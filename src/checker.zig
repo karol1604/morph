@@ -60,6 +60,7 @@ pub const Checker = struct {
     scopes: std.ArrayList(*Scope),
     globalScope: *Scope,
     typeStore: TypeStore,
+    nextVarId: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
         const globalScope = try ctx.allocator.create(Scope);
@@ -157,6 +158,7 @@ pub const Checker = struct {
             expr.span,
         );
     }
+
     fn checkFunctionDef(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
         const funcDef = expr.kind.FunctionDef;
         const funcSig = self.currentScope().lookupSymbol(funcDef.name);
@@ -175,10 +177,12 @@ pub const Checker = struct {
 
         for (params, 0..) |paramTypeId, idx| {
             const paramName = funcDef.params[idx];
+            const id = self.getNewVarId();
             const paramSym = type_store.Symbol{
                 .name = paramName,
                 .typeId = paramTypeId,
                 .kind = .Variable,
+                .id = id,
             };
             try self.currentScope().defineSymbol(paramSym);
         }
@@ -235,10 +239,12 @@ pub const Checker = struct {
 
         std.debug.print("Function `{s}` has typeId `{d}` with {any}\n", .{ funcSig.name, funcTypeId, self.typeStore.types.items[funcTypeId].Function });
 
+        const id = self.getNewVarId();
         const funcSym = type_store.Symbol{
             .name = funcSig.name,
             .typeId = funcTypeId,
             .kind = .Function,
+            .id = id,
         };
 
         try self.currentScope().defineSymbol(funcSym);
@@ -248,13 +254,13 @@ pub const Checker = struct {
                 .FunctionTypeSignature = .{
                     .name = funcSig.name,
                     .domain = try self.typedExpr(
-                        .{ .Identifier = "DOMAIN" }, // FIXME: add proper type expr support
+                        .{ .Identifier = .{ .name = "DOMAIN", .id = 0 } }, // FIXME: add proper type expr support
                         domainId,
                         null,
                         funcSig.domain.span,
                     ),
                     .codomain = try self.typedExpr(
-                        .{ .Identifier = "CODOMAIN" }, // FIXME: add proper type expr support
+                        .{ .Identifier = .{ .name = "CODOMAIN", .id = 0 } }, // FIXME: add proper type expr support
                         codomainId,
                         null,
                         funcSig.codomain.span,
@@ -348,7 +354,7 @@ pub const Checker = struct {
 
             // Return a dummy expr of error type
             return try self.typedExpr(
-                .{ .Identifier = identName },
+                .{ .Identifier = .{ .name = identName, .id = 0 } }, // NOTE: id doesn't matter since it's error-typed
                 ERROR_TYPE_ID,
                 null,
                 expr.span,
@@ -357,7 +363,7 @@ pub const Checker = struct {
 
         std.debug.print("Identifier `{s}` resolved to `{s}`\n", .{ identName, self.typeStore.formatTypeName(symbol.?.typeId) });
         return try self.typedExpr(
-            .{ .Identifier = identName },
+            .{ .Identifier = .{ .name = identName, .id = symbol.?.id } },
             symbol.?.typeId,
             typeHint,
             expr.span,
@@ -391,6 +397,8 @@ pub const Checker = struct {
 
         const valueChecked = try self.checkExpr(varDecl.value, expectedTypeId);
 
+        const id = self.getNewVarId();
+
         var resultType: TypeId = UNIT_TYPE_ID;
         if (self.typeStore.get(.{ .Named = varDecl.name })) |_| {
             // NOTE: ????
@@ -401,7 +409,7 @@ pub const Checker = struct {
             // );
             resultType = ERROR_TYPE_ID;
         } else {
-            self.declareVariable(varDecl.name, valueChecked.typeId) catch |err| switch (err) {
+            self.declareVariable(varDecl.name, valueChecked.typeId, id) catch |err| switch (err) {
                 error.VariableAlreadyDeclared => {
                     self.ctx.reportError(
                         expr.span,
@@ -418,6 +426,7 @@ pub const Checker = struct {
             .{ .VariableDecl = .{
                 .name = varDecl.name,
                 .value = valueChecked,
+                .id = id,
             } },
             resultType,
             null,
@@ -425,7 +434,7 @@ pub const Checker = struct {
         );
     }
 
-    fn declareVariable(self: *Checker, name: []const u8, typeId: TypeId) !void {
+    fn declareVariable(self: *Checker, name: []const u8, typeId: TypeId, id: usize) !void {
         const scope = self.currentScope();
         if (scope.lookupSymbol(name)) |_| {
             return error.VariableAlreadyDeclared;
@@ -435,6 +444,7 @@ pub const Checker = struct {
             .name = name,
             .typeId = typeId,
             .kind = .Variable,
+            .id = id,
         };
 
         try self.currentScope().defineSymbol(symbol);
@@ -606,6 +616,11 @@ pub const Checker = struct {
         });
     }
 
+    fn getNewVarId(self: *Checker) usize {
+        const id = self.nextVarId;
+        self.nextVarId += 1;
+        return id;
+    }
     fn currentScope(self: *const Checker) *Scope {
         return self.scopes.items[self.scopes.items.len - 1];
     }

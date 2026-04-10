@@ -3,12 +3,6 @@ const context = @import("context.zig");
 const checked_ast = @import("checked_ast.zig");
 
 const TempId = usize;
-const Opcode = enum {
-    Add,
-    Sub,
-    Mul,
-    Div,
-};
 
 const Value = union(enum) {
     Temp: TempId,
@@ -18,10 +12,10 @@ const Value = union(enum) {
     Variable: []const u8,
 };
 
-const OperandType = enum {
-    Variable,
-    Literal,
-    Temp,
+const OperandType = union(enum) {
+    Unit,
+    Int,
+    Bool,
 };
 
 const Operand = struct {
@@ -29,14 +23,12 @@ const Operand = struct {
     type: OperandType,
 
     pub fn format(self: Operand, writer: *std.io.Writer) !void {
-        return switch (self.type) {
-            .Temp => try writer.print("t{d}", .{self.value.Temp}),
-            .Literal => switch (self.value) {
-                .Int => |v| try writer.print("{d}", .{v}),
-                .Bool => |v| try writer.print("{s}", .{if (v) "true" else "false"}),
-                else => try writer.print("unit", .{}),
-            },
-            .Variable => try writer.print("{s}", .{self.value.Variable}),
+        return switch (self.value) {
+            .Temp => |id| try writer.print("t{d}", .{id}),
+            .Unit => try writer.print("()", .{}),
+            .Int => |i| try writer.print("{d}", .{i}),
+            .Bool => |b| try writer.print("{s}", .{if (b) "true" else "false"}),
+            .Variable => |name| try writer.print("{s}", .{name}),
         };
     }
 };
@@ -62,6 +54,10 @@ const Instr = union(enum) {
         left: Operand,
         right: Operand,
     },
+    Assign: struct {
+        target: Operand,
+        value: Operand,
+    },
 
     pub fn format(self: Instr, writer: *std.io.Writer) !void {
         return switch (self) {
@@ -81,13 +77,23 @@ const Instr = union(enum) {
                 "{f} := {f} / {f}\n",
                 .{ d.result, d.left, d.right },
             ),
+            .Assign => |a| try writer.print(
+                "{f} := {f}\n",
+                .{ a.target, a.value },
+            ),
         };
     }
+};
+
+const Variable = struct {
+    name: []const u8,
+    type: OperandType,
 };
 
 pub const IRGen = struct {
     ctx: *context.CompilerContext,
     instructions: std.ArrayList(Instr) = .empty,
+    variables: std.ArrayList(Variable) = .empty,
     tempId: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext) IRGen {
@@ -103,24 +109,45 @@ pub const IRGen = struct {
         return self.instructions.toOwnedSlice(self.ctx.allocator);
     }
 
+    fn addVariable(self: *IRGen, name: []const u8, id: usize, ty: OperandType) !void {
+        const n = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ name, id });
+        try self.variables.append(self.ctx.allocator, Variable{
+            .name = n,
+            .type = ty,
+        });
+    }
+
+    fn lookupVariable(self: *IRGen, name: []const u8, id: usize) ?Variable {
+        const fullName = std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ name, id }) catch return null;
+        for (self.variables.items) |v| {
+            if (std.mem.eql(u8, v.name, fullName)) {
+                return v;
+            }
+        }
+        return null;
+    }
+
     fn genExpr(self: *IRGen, expr: *const checked_ast.CheckedExpr) !Operand {
         switch (expr.kind) {
             .IntLiteral => |v| {
-                return Operand{ .value = .{ .Int = v }, .type = .Literal };
+                return Operand{ .value = .{ .Int = v }, .type = .Int };
             },
             .BoolLiteral => |v| {
-                return Operand{ .value = .{ .Bool = v }, .type = .Literal };
+                return Operand{ .value = .{ .Bool = v }, .type = .Bool };
             },
-            .Identifier => |name| {
-                // If this is just a variable usage (reading it), return the variable operand
-                return Operand{ .value = .{ .Variable = name }, .type = .Variable };
+            .Identifier => |ident| {
+                const v = self.lookupVariable(ident.name, ident.id) orelse return error.UndefinedVariable;
+                return Operand{
+                    .value = .{ .Variable = v.name },
+                    .type = v.type,
+                };
             },
             .Binary => |bin| {
                 const leftOp = try self.genExpr(bin.left);
                 const rightOp = try self.genExpr(bin.right);
 
                 const resultTempId = self.makeTemp();
-                const resultOp = Operand{ .value = .{ .Temp = resultTempId }, .type = .Temp };
+                const resultOp = Operand{ .value = .{ .Temp = resultTempId }, .type = .Int };
 
                 var instr: Instr = undefined;
                 switch (bin.operator) {
@@ -157,6 +184,39 @@ pub const IRGen = struct {
 
                 try self.instructions.append(self.ctx.allocator, instr);
                 return resultOp;
+            },
+            .Block => |block| {
+                std.debug.print("Entering block\n", .{});
+
+                var lastOp: ?Operand = null;
+                for (block.stmts) |stmt| {
+                    lastOp = try self.genExpr(stmt);
+                }
+
+                if (block.tail) |tailExpr| {
+                    return try self.genExpr(tailExpr);
+                }
+                std.debug.print("Empty block, returning unit\n", .{});
+                return Operand{ .value = .Unit, .type = .Unit };
+            },
+            .VariableDecl => |decl| { // TODO: finish
+                const val = try self.genExpr(decl.value);
+                const name = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ decl.name, decl.id });
+
+                try self.instructions.append(self.ctx.allocator, Instr{ .Assign = .{
+                    .target = Operand{
+                        .value = .{ .Variable = name },
+                        .type = val.type,
+                    },
+                    .value = val,
+                } });
+
+                try self.addVariable(decl.name, decl.id, val.type);
+
+                return Operand{
+                    .value = .Unit,
+                    .type = .Unit,
+                };
             },
             else => return error.Unimplemented,
         }
