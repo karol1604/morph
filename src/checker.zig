@@ -244,6 +244,12 @@ pub const Checker = struct {
         var paramTypes: std.ArrayList(TypeId) = .empty;
 
         switch (typeItem) {
+            .Named => |name| {
+                if (std.mem.eql(u8, name, "Unit")) {
+                    return paramTypes.toOwnedSlice(self.ctx.allocator); // special case for no function params
+                }
+                try paramTypes.append(self.ctx.allocator, typeId);
+            },
             .Product => |prod| {
                 try paramTypes.append(self.ctx.allocator, prod.left);
                 const rest = try self.collectParamTypes(prod.right);

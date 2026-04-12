@@ -96,10 +96,10 @@ pub const Parser = struct {
         _ = try self.expect(.DoubleRightArrow);
 
         const body = try self.parseExpression(.Lowest);
-        if (std.meta.activeTag(body.kind) != .Block) {
-            // require semicolon if body is not a block
-            _ = try self.expect(.Semicolon);
-        }
+        // if (std.meta.activeTag(body.kind) != .Block) {
+        //     // require semicolon if body is not a block
+        //     _ = try self.expect(.Semicolon);
+        // }
 
         return self.heapAlloc(Expr, Expr{
             .kind = .{ .FunctionDef = .{
@@ -236,7 +236,16 @@ pub const Parser = struct {
     }
 
     fn parseTypeGroupExpression(self: *Parser) anyerror!*Expr {
+        const startSpan = self.currentToken().span;
         self.advance(); // consume the left paren
+
+        if (self.currentToken().kind == .RParen) {
+            self.advance(); // consume the right paren
+            return self.heapAlloc(Expr, .{
+                .kind = .{ .Identifier = "Unit" },
+                .span = Span.join(startSpan, self.currentToken().span),
+            });
+        }
         const expr = try self.parseTypeExpression(.Lowest);
         if (self.currentToken().kind != .RParen) {
             return error.UnclosedLParen;

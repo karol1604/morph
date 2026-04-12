@@ -41,6 +41,7 @@ const Operand = struct {
 
 const Terminator = union(enum) {
     Return: Operand,
+    Exit: Operand,
     Jump: usize, // target block id
     ConditionalJump: struct {
         condition: Operand,
@@ -51,6 +52,7 @@ const Terminator = union(enum) {
     pub fn format(self: Terminator, writer: *std.io.Writer) !void {
         return switch (self) {
             .Return => |value| try writer.print("return {f}", .{value}),
+            .Exit => |code| try writer.print("exit {f}", .{code}),
             .Jump => |target| try writer.print("jump Block {d}", .{target}),
             .ConditionalJump => |cj| try writer.print(
                 "if {f} then jump Block {d} else jump Block {d}",
@@ -246,11 +248,16 @@ pub const IRGen = struct {
 
     pub fn generate(self: *IRGen, exprs: []const *checked_ast.CheckedExpr) !void {
         try self.createFunction("main", null);
-        for (exprs) |expr| {
-            _ = try self.genExpr(expr);
-        }
+        const exitCode = if (exprs.len > 0) blk: {
+            for (exprs[0 .. exprs.len - 1]) |expr| {
+                _ = try self.genExpr(expr);
+            }
+            const last = try self.genExpr(exprs[exprs.len - 1]);
+            if (last.type == .Int) break :blk last;
+            break :blk Operand{ .value = .{ .Int = 0 }, .type = .Int };
+        } else Operand{ .value = .{ .Int = 0 }, .type = .Int };
 
-        self.setTerminator(.{ .Return = Operand{ .value = .Unit, .type = .Unit } });
+        self.setTerminator(.{ .Exit = exitCode });
 
         // const f_idx = self.currentFuncIdx.?;
         // const b_idx = self.currentBlockIdx.?;
