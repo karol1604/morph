@@ -356,10 +356,11 @@ pub const Parser = struct {
 
         const name = try self.expectIdent(); // consume the ident
 
-        var ty: ?[]const u8 = null;
+        var ty: ?*const Expr = null;
         if (self.currentToken().kind == .In) {
             self.advance(); // consume the `in`
-            ty = try self.expectIdent();
+            // ty = try self.expectIdent();
+            ty = try self.parseTypeExpression(.Lowest);
         }
         _ = try self.expect(.Equal); // consume `=`
 

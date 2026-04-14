@@ -23,7 +23,7 @@ const OperandType = union(enum) {
     },
 };
 
-const Operand = struct {
+pub const Operand = struct {
     value: Value,
     type: OperandType,
 
@@ -39,7 +39,7 @@ const Operand = struct {
     }
 };
 
-const Terminator = union(enum) {
+pub const Terminator = union(enum) {
     Return: Operand,
     Exit: Operand,
     Jump: usize, // target block id
@@ -62,7 +62,7 @@ const Terminator = union(enum) {
     }
 };
 
-const BasicBlock = struct {
+pub const BasicBlock = struct {
     id: usize,
     instructions: std.ArrayList(Instr) = .empty,
     terminator: ?Terminator = null,
@@ -82,7 +82,7 @@ const BasicBlock = struct {
     }
 };
 
-const IRFunction = struct {
+pub const IRFunction = struct {
     name: []const u8,
     // id: usize,
     parameters: std.ArrayList(Operand) = .empty,
@@ -97,7 +97,7 @@ const IRFunction = struct {
     }
 };
 
-const Instr = union(enum) {
+pub const Instr = union(enum) {
     Add: struct {
         result: Operand,
         left: Operand,

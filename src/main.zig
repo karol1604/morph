@@ -8,6 +8,8 @@ const parserTests = @import("tests/parser.zig");
 const utils = @import("utils.zig");
 const Span = @import("span.zig").Span;
 const CompilerContext = context.CompilerContext;
+const codegen = @import("codegen.zig");
+const targ = @import("target.zig");
 
 fn printDiagnostics(ctx: *CompilerContext) void {
     for (ctx.diagnostics.items) |diag| {
@@ -144,6 +146,16 @@ pub fn main() !void {
 
     irGen.dump();
 
+    const target = targ.Target.current();
+    std.debug.print("Current target: {f} {f}\n", .{ target.arch, target.os });
+    var codeGen = codegen.CodeGen.init(&ctx, target, &irGen);
+    try codeGen.generate();
+
+    const asmPath = "/Users/karol/projects/morph/tmp/out.s";
+    const binPath = "/Users/karol/projects/morph/tmp/out";
+    try codeGen.writeToFile(asmPath);
+    try assembleAndLink(arena.allocator(), asmPath, binPath);
+
     // std.debug.print("Generated IR({d}):\n", .{instructions.len});
     // for (instructions) |instr| {
     //     std.debug.print("{f}", .{instr});
@@ -152,4 +164,51 @@ pub fn main() !void {
 
 test "Tests" {
     std.testing.refAllDecls(parserTests);
+}
+
+fn assembleAndLink(allocator: std.mem.Allocator, asmPath: []const u8, outPath: []const u8) !void {
+    // assemble
+    const objPath = "/tmp/out.o";
+    const asResult = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "as", "-o", objPath, asmPath },
+    });
+    if (asResult.term.Exited != 0) {
+        std.debug.print("Assembler error:\n{s}\n", .{asResult.stderr});
+        return error.AssemblerFailed;
+    }
+
+    // link
+    const sdkPath = try getSdkPath(allocator);
+    const ldResult = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{
+            "ld",
+            "-o",
+            outPath,
+            objPath,
+            "-lSystem",
+            "-syslibroot",
+            sdkPath,
+            "-e",
+            "_main",
+            "-arch",
+            "arm64",
+        },
+    });
+    if (ldResult.term.Exited != 0) {
+        std.debug.print("Linker error:\n{s}\n", .{ldResult.stderr});
+        return error.LinkerFailed;
+    }
+
+    std.debug.print("Binary written to {s}\n", .{outPath});
+}
+
+fn getSdkPath(allocator: std.mem.Allocator) ![]const u8 {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "xcrun", "--sdk", "macosx", "--show-sdk-path" },
+    });
+    // trim the trailing newline
+    return std.mem.trimRight(u8, result.stdout, "\n");
 }

@@ -425,17 +425,18 @@ pub const Checker = struct {
             );
         }
 
-        if (varDecl.type) |typeName| {
-            if (self.typeStore.get(.{ .Named = typeName })) |tid| {
-                expectedTypeId = tid;
-            } else {
-                self.ctx.reportError(
-                    expr.span,
-                    "unknown type `{s}`",
-                    .{typeName},
-                );
-                expectedTypeId = ERROR_TYPE_ID;
-            }
+        if (varDecl.type) |typeExpr| {
+            // if (self.typeStore.get(.{ .Named = typeExpr })) |tid| {
+            //     expectedTypeId = tid;
+            // } else {
+            //     self.ctx.reportError(
+            //         expr.span,
+            //         "unknown type `{s}`",
+            //         .{typeExpr},
+            //     );
+            //     expectedTypeId = ERROR_TYPE_ID;
+            // }
+            expectedTypeId = try self.resolveTypeExpr(typeExpr);
         }
 
         const valueChecked = try self.checkExpr(varDecl.value, expectedTypeId);

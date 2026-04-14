@@ -25,7 +25,8 @@ pub const ExprKind = union(enum) {
     VariableDecl: struct {
         name: []const u8,
         value: *const Expr,
-        type: ?[]const u8, // TODO: make this a proper type expression
+        // type: ?[]const u8, // TODO: make this a proper type expression
+        type: ?*const Expr,
     },
 
     Block: struct {
