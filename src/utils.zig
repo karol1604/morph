@@ -79,7 +79,7 @@ fn prettyPrintRec(
         .VariableDecl => |varDecl| {
             if (varDecl.type) |ty| {
                 _ = ty;
-                //TODO: fix this
+                // TODO: fix this
                 // std.debug.print("VariableDecl {s} (∈ {f}) =\n", .{ varDecl.name, ty });
                 std.debug.print("VariableDecl {s} (∈ ... ) =\n", .{varDecl.name});
             } else {

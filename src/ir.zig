@@ -37,6 +37,17 @@ pub const Operand = struct {
             .Function => |name| try writer.print("{s}", .{name}),
         };
     }
+
+    pub fn toString(self: Operand) []const u8 {
+        return switch (self.value) {
+            .Temp => |id| std.fmt.allocPrint(std.heap.page_allocator, "t{d}", .{id}) catch @panic("Failed to format temp operand"),
+            .Unit => "()",
+            .Int => |i| std.fmt.allocPrint(std.heap.page_allocator, "{d}", .{i}) catch @panic("Failed to format int operand"),
+            .Bool => |b| if (b) "true" else "false",
+            .Variable => |name| name,
+            .Function => |name| name,
+        };
+    }
 };
 
 pub const Terminator = union(enum) {
@@ -247,7 +258,7 @@ pub const IRGen = struct {
     }
 
     pub fn generate(self: *IRGen, exprs: []const *checked_ast.CheckedExpr) !void {
-        try self.createFunction("main", null);
+        try self.createFunction("_main", null);
         const exitCode = if (exprs.len > 0) blk: {
             for (exprs[0 .. exprs.len - 1]) |expr| {
                 _ = try self.genExpr(expr);
@@ -537,7 +548,7 @@ pub const IRGen = struct {
                 const fullName = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ func.name, func.id });
                 return Operand{
                     .value = .{ .Function = fullName },
-                    .type = .{ .Function = .{ .returnType = &bodyOp.type } }, //BUG: dangling pointer, need to figure out how to handle function types properly
+                    .type = .{ .Function = .{ .returnType = &bodyOp.type } }, // BUG: dangling pointer, need to figure out how to handle function types properly
                 };
             },
             .FunctionTypeSignature => return Operand{ .value = .Unit, .type = .Unit }, // NOTE: noop
