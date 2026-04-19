@@ -1,4 +1,4 @@
-let x = 42;
-let y = 69;
-let z = 35;
-z
+let x = 100;
+let y = x / 10;
+let z = 50 + 14 / 2;
+z + y

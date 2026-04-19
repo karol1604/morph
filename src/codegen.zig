@@ -77,42 +77,86 @@ pub const CodeGen = struct {
 
         switch (instr) {
             .Assign => |op| {
+                try self.emit("    ; assign {f} = {f}\n", .{ op.target, op.value });
                 switch (op.value.value) {
-                    .Int => |i| {
-                        try self.emit("    ; assign {f} = {f}\n", .{ op.target, op.value });
-                        try self.emit("    mov x0, #{d}\n", .{i});
-                        // TODO: negate the offset since we are growing downwards
-                        try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-
-                        self.varToStackOffset.put(op.target.toString(), self.currentStackOffset) catch {
-                            @panic("Failed to map variable to stack offset");
-                        };
-
-                        self.currentStackOffset -= 8;
-                    },
-                    else => @panic("Unsupported operand type for assign instruction"),
+                    .Int => |i| try self.emit("    mov x0, #{d}\n", .{i}),
+                    else => try self.loadOperand(op.value, "x0"),
                 }
+                try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
+                try self.varToStackOffset.put(op.target.toString(), self.currentStackOffset);
+                self.currentStackOffset -= 8;
+            },
+            .Add => |op| {
+                try self.emit("    ; add {f} = {f} + {f}\n", .{ op.result, op.left, op.right });
+
+                try self.loadOperand(op.left, "x0");
+                try self.loadOperand(op.right, "x1");
+
+                try self.emit("    add x0, x0, x1\n", .{});
+
+                try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
+                try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
+                self.currentStackOffset -= 8;
+            },
+            .Sub => |op| {
+                try self.emit("    ; sub {f} = {f} - {f}\n", .{ op.result, op.left, op.right });
+                try self.loadOperand(op.left, "x0");
+                try self.loadOperand(op.right, "x1");
+
+                try self.emit("    sub x0, x0, x1\n", .{});
+
+                try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
+                try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
+                self.currentStackOffset -= 8;
+            },
+            .Mul => |op| {
+                try self.emit("    ; mul {f} = {f} * {f}\n", .{ op.result, op.left, op.right });
+                try self.loadOperand(op.left, "x0");
+                try self.loadOperand(op.right, "x1");
+                try self.emit("    mul x0, x0, x1\n", .{});
+                try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
+                try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
+                self.currentStackOffset -= 8;
+            },
+            .Div => |op| {
+                try self.emit("    ; div {f} = {f} / {f}\n", .{ op.result, op.left, op.right });
+                try self.loadOperand(op.left, "x0");
+                try self.loadOperand(op.right, "x1");
+                try self.emit("    sdiv x0, x0, x1\n", .{});
+                try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
+                try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
+                self.currentStackOffset -= 8;
             },
             else => @panic("Unsupported instruction type"),
+        }
+    }
+
+    fn loadOperand(self: *CodeGen, operand: ir.Operand, reg: []const u8) !void {
+        switch (operand.value) {
+            .Int => |i| try self.emit("    mov {s}, #{d}\n", .{ reg, i }),
+            .Variable => |name| {
+                const offset = self.varToStackOffset.get(name) orelse unreachable;
+                try self.emit("    ldr {s}, [x29, #{d}] ; load {s}\n", .{ reg, offset, name });
+            },
+            .Temp => |id| {
+                const tempName = std.fmt.allocPrint(self.ctx.allocator, "t{}", .{id}) catch unreachable;
+                const offset = self.varToStackOffset.get(tempName) orelse unreachable;
+                try self.emit("    ldr {s}, [x29, #{d}] ; load t{d}\n", .{ reg, offset, id });
+            },
+            else => @panic("Unsupported operand type"),
         }
     }
 
     fn emitTerminator(self: *CodeGen, term: ir.Terminator) !void {
         switch (term) {
             .Exit => |op| {
+                try self.emit("    ; exit {f}\n", .{op});
                 switch (op.value) {
-                    .Int => |code| {
-                        try self.emit("    mov x0, #{d}\n", .{code});
-                        try self.emit("    mov x16, #1\n    svc #0x80\n", .{});
-                    },
-                    .Variable => |name| {
-                        // NOTE: im pretty sure that the IR enforces that the variable used in an exit terminator must be assigned to an integer literal, so this should be safe
-                        const offset = self.varToStackOffset.get(name) orelse unreachable;
-                        try self.emit("    ldr x0, [x29, #{d}]\n", .{offset});
-                        try self.emit("    mov x16, #1\n    svc #0x80\n", .{});
-                    },
-                    else => @panic("Unsupported exit operand type"),
+                    .Int => |code| try self.emit("    mov x0, #{d}\n", .{code}),
+                    .Variable, .Temp => try self.loadOperand(op, "x0"),
+                    else => @panic("unsupported exit operand"),
                 }
+                try self.emit("    mov x16, #1\n    svc #0x80\n", .{});
             },
             else => @panic("Unsupported terminator type"),
         }
@@ -120,6 +164,7 @@ pub const CodeGen = struct {
 
     fn emit(self: *CodeGen, comptime fmt: []const u8, args: anytype) !void {
         try self.output.writer(self.ctx.allocator).print(fmt, args);
+        std.debug.print(fmt, args); // for debugging
     }
 
     fn emitPrologue(self: *CodeGen, frameSize: usize) !void {
@@ -142,7 +187,8 @@ pub const CodeGen = struct {
         for (func.blocks.items) |block| {
             for (block.instructions.items) |instr| {
                 switch (instr) {
-                    .Assign => count += 1,
+                    // TODO: dont forget about the rest
+                    .Assign, .Add, .Sub, .Mul, .Div => count += 1,
                     else => {},
                 }
             }
