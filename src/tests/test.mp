@@ -1,4 +1,11 @@
-let x = 100;
-let y = x / 10;
-let z = 50 + 14 / 2;
-z + y
+add: Int × Int -> Int;
+add(x, y) => {
+    x + y
+};
+
+double: Int -> Int;
+double(x) => {
+    add(x, x)
+};
+
+double(21)

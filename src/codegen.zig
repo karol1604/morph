@@ -11,6 +11,7 @@ pub const CodeGen = struct {
     irGen: *const ir.IRGen,
     varToStackOffset: std.StringHashMap(isize),
     currentStackOffset: isize = -8,
+    currentFrameSize: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext, target: targ.Target, irGen: *const ir.IRGen) CodeGen {
         return CodeGen{
@@ -41,11 +42,20 @@ pub const CodeGen = struct {
 
     fn emitFunction(self: *CodeGen, func: ir.IRFunction) !void {
         self.currentStackOffset = -8; // reset stack offset for each function
-        try self.emit("{s}:\n", .{func.name});
+        // FIXME: this is horrid, we should just replace the # with something else in the IR
+        // const label = try std.mem.replaceOwned(u8, self.ctx.allocator, func.name, "#", "$");
+        try self.emit("{s}:\n; param count: {d}\n", .{ func.name, func.params.items.len });
 
-        const frameSize = CodeGen.calculateFrameSize(func);
+        self.currentFrameSize = CodeGen.calculateFrameSize(func);
+        try self.emitPrologue(self.currentFrameSize);
 
-        try self.emitPrologue(frameSize);
+        // FIXME: does not work for more than 8 params in the arm64 calling convention, but we can fix that later
+        for (func.params.items, 0..) |param, idx| {
+            try self.emit("    ; param {d}: {f}\n", .{ idx, param });
+            try self.emit("    str x{d}, [x29, #{d}]\n\n", .{ idx, self.currentStackOffset });
+            try self.varToStackOffset.put(param.toString(), self.currentStackOffset);
+            self.currentStackOffset -= 8;
+        }
 
         for (func.blocks.items) |block| {
             try self.emitBlock(block);
@@ -58,6 +68,8 @@ pub const CodeGen = struct {
         //     try self.emit("    ldp x29, x30, [sp, #{d}]\n", .{frameSize - 16});
         //     try self.emit("    add sp, sp, #{d}\n", .{frameSize});
         // }
+
+        try self.emit("\n", .{});
     }
 
     fn emitBlock(self: *CodeGen, block: ir.BasicBlock) !void {
@@ -86,6 +98,7 @@ pub const CodeGen = struct {
                 try self.varToStackOffset.put(op.target.toString(), self.currentStackOffset);
                 self.currentStackOffset -= 8;
             },
+            // TODO: abstract these to a function
             .Add => |op| {
                 try self.emit("    ; add {f} = {f} + {f}\n", .{ op.result, op.left, op.right });
 
@@ -127,6 +140,18 @@ pub const CodeGen = struct {
                 try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
                 self.currentStackOffset -= 8;
             },
+            .Call => |op| {
+                try self.emit("    ; call {s}({d} args)[{f}]\n", .{ op.callee, op.args.len, op.result });
+                for (op.args, 0..) |arg, idx| {
+                    try self.emit("    ; arg {d}: {f}\n", .{ idx, arg });
+                    const reg = std.fmt.allocPrint(self.ctx.allocator, "x{d}", .{idx}) catch unreachable;
+                    try self.loadOperand(arg, reg);
+                }
+                try self.emit("    bl {s}\n", .{op.callee});
+                try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
+                try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
+                self.currentStackOffset -= 8;
+            },
             else => @panic("Unsupported instruction type"),
         }
     }
@@ -158,6 +183,12 @@ pub const CodeGen = struct {
                 }
                 try self.emit("    mov x16, #1\n    svc #0x80\n", .{});
             },
+            .Return => |op| {
+                try self.emit("    ; return {f}\n", .{op});
+                try self.loadOperand(op, "x0");
+                try self.emitEpilogue(self.currentFrameSize);
+                try self.emit("    ret\n", .{});
+            },
             else => @panic("Unsupported terminator type"),
         }
     }
@@ -177,18 +208,24 @@ pub const CodeGen = struct {
         try self.emit("    add x29, sp, #{d}\n\n", .{frameSize - 16});
     }
 
+    fn emitEpilogue(self: *CodeGen, frameSize: usize) !void {
+        try self.emit("\n    ; epilogue\n", .{});
+        try self.emit("    ldp x29, x30, [sp, #{d}]\n", .{frameSize - 16});
+        try self.emit("    add sp, sp, #{d}\n", .{frameSize});
+    }
+
     fn emitHeader(self: *CodeGen) !void {
         try self.emit(".global _main\n", .{}); // NOTE: hardcoded
         try self.emit(".align 2\n\n", .{});
     }
 
     fn calculateFrameSize(func: ir.IRFunction) usize {
-        var count: usize = 0;
+        var count: usize = func.params.items.len;
         for (func.blocks.items) |block| {
             for (block.instructions.items) |instr| {
                 switch (instr) {
                     // TODO: dont forget about the rest
-                    .Assign, .Add, .Sub, .Mul, .Div => count += 1,
+                    .Assign, .Add, .Sub, .Mul, .Div, .Call => count += 1,
                     else => {},
                 }
             }

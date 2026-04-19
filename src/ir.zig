@@ -96,7 +96,7 @@ pub const BasicBlock = struct {
 pub const IRFunction = struct {
     name: []const u8,
     // id: usize,
-    parameters: std.ArrayList(Operand) = .empty,
+    params: std.ArrayList(Operand) = .empty,
     blocks: std.ArrayList(BasicBlock) = .empty,
     entryBlockId: usize,
 
@@ -290,7 +290,7 @@ pub const IRGen = struct {
     fn createFunction(self: *IRGen, name: []const u8, id: ?usize) !void {
         var funcName: []const u8 = name;
         if (id) |i| {
-            funcName = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ name, i });
+            funcName = try std.fmt.allocPrint(self.ctx.allocator, "{s}${d}", .{ name, i });
         }
         // const id = self.nextFuncId;
         // self.nextFuncId += 1;
@@ -534,7 +534,7 @@ pub const IRGen = struct {
                         }) },
                         .type = .Int, // TODO: actually use parameter type
                     };
-                    try self.functions.items[self.currentFuncIdx.?].parameters.append(self.ctx.allocator, paramOp);
+                    try self.functions.items[self.currentFuncIdx.?].params.append(self.ctx.allocator, paramOp);
                     try self.addVariable(param.name, param.id, paramOp.type);
                 }
                 const bodyOp = try self.genExpr(func.body);
@@ -545,7 +545,7 @@ pub const IRGen = struct {
                 self.currentFuncIdx = prevFuncIdx;
                 self.currentBlockIdx = prevBlockIdx;
 
-                const fullName = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ func.name, func.id });
+                const fullName = try std.fmt.allocPrint(self.ctx.allocator, "{s}${d}", .{ func.name, func.id });
                 return Operand{
                     .value = .{ .Function = fullName },
                     .type = .{ .Function = .{ .returnType = &bodyOp.type } }, // BUG: dangling pointer, need to figure out how to handle function types properly
@@ -563,7 +563,7 @@ pub const IRGen = struct {
                 const t = self.operandTypeFromTypeId(expr.typeId);
                 const resultOp = Operand{ .value = .{ .Temp = resultTempId }, .type = t };
 
-                const fullname = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ call.callee, call.id });
+                const fullname = try std.fmt.allocPrint(self.ctx.allocator, "{s}${d}", .{ call.callee, call.id });
                 try self.emit(Instr{ .Call = .{
                     .result = resultOp,
                     .callee = fullname,
