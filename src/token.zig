@@ -14,6 +14,8 @@ pub const TokenType = union(enum) {
     KwLet,
     KwAnd,
     KwOr,
+    KwIf,
+    KwElse,
 
     RightArrow,
     DoubleRightArrow,
@@ -58,6 +60,8 @@ pub const TokenType = union(enum) {
             .KwLet => try writer.print("let", .{}),
             .KwAnd => try writer.print("and", .{}),
             .KwOr => try writer.print("or", .{}),
+            .KwIf => try writer.print("if", .{}),
+            .KwElse => try writer.print("else", .{}),
 
             .RightArrow => try writer.print("->", .{}),
             .DoubleRightArrow => try writer.print("=>", .{}),
@@ -116,6 +120,8 @@ pub const Token = struct {
             .KwLet => try writer.print("KW_LET", .{}),
             .KwAnd => try writer.print("KW_AND", .{}),
             .KwOr => try writer.print("KW_OR", .{}),
+            .KwIf => try writer.print("KW_IF", .{}),
+            .KwElse => try writer.print("KW_ELSE", .{}),
 
             .Semicolon => try writer.print("TOK_SEMICOLON", .{}),
             .Comma => try writer.print("TOK_COMMA", .{}),
@@ -155,4 +161,6 @@ pub const Keywords = std.StaticStringMap(TokenType).initComptime(.{
     .{ "let", .KwLet },
     .{ "and", .KwAnd },
     .{ "or", .KwOr },
+    .{ "if", .KwIf },
+    .{ "else", .KwElse },
 });

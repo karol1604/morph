@@ -137,10 +137,8 @@ fn prettyPrintRec(
 
             treeLines[depth] = !isLast;
 
-            // Child 1: Domain (Input) - Not Last
             prettyPrintRec(sig.domain.*.kind, depth + 1, treeLines, false);
 
-            // Child 2: Codomain (Output) - Last
             prettyPrintRec(sig.codomain.*.kind, depth + 1, treeLines, true);
         },
         .FunctionDef => |def| {
@@ -160,6 +158,20 @@ fn prettyPrintRec(
             for (call.args, 0..) |arg, i| {
                 const is_last_child = (i == arg_count - 1);
                 prettyPrintRec(arg.kind, depth + 1, treeLines, is_last_child);
+            }
+        },
+        .If => |ifExpr| {
+            const isElseBranch = if (ifExpr.elseBranch) |_| true else false;
+            std.debug.print("If\n", .{});
+
+            treeLines[depth] = !isLast;
+
+            prettyPrintRec(ifExpr.condition.*.kind, depth + 1, treeLines, false);
+
+            prettyPrintRec(ifExpr.thenBranch.*.kind, depth + 1, treeLines, !isElseBranch);
+
+            if (ifExpr.elseBranch) |elseBranch| {
+                prettyPrintRec(elseBranch.*.kind, depth + 1, treeLines, true);
             }
         },
         // else => {},
@@ -282,7 +294,6 @@ fn prettyPrintRecCheck(
 
             treeLines[depth] = !isLast;
 
-            // Child 1: Body - Last
             prettyPrintRecCheck(def.body, depth + 1, treeLines, true);
         },
         .FunctionCall => |call| {
@@ -294,6 +305,21 @@ fn prettyPrintRecCheck(
             for (call.args, 0..) |arg, i| {
                 const is_last_child = (i == arg_count - 1);
                 prettyPrintRecCheck(arg, depth + 1, treeLines, is_last_child);
+            }
+        },
+        .If => |ifExpr| {
+            const isElseBranch = if (ifExpr.elseBranch) |_| true else false;
+
+            std.debug.print("If (typeId: {d})\n", .{expr.typeId});
+
+            treeLines[depth] = !isLast;
+
+            prettyPrintRecCheck(ifExpr.condition, depth + 1, treeLines, false);
+
+            prettyPrintRecCheck(ifExpr.thenBranch, depth + 1, treeLines, !isElseBranch);
+
+            if (ifExpr.elseBranch) |elseBranch| {
+                prettyPrintRecCheck(elseBranch, depth + 1, treeLines, true);
             }
         },
         // else => {},

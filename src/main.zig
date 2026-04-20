@@ -132,6 +132,11 @@ pub fn main() !void {
         return error.CompilationFailed;
     }
 
+    for (checkedExprs) |expr| {
+        std.debug.print("- ", .{});
+        utils.prettyPrintCheckedExpression(&expr.*);
+    }
+
     var irGen = ir.IRGen.init(&ctx);
     try irGen.generate(checkedExprs);
 
@@ -139,10 +144,6 @@ pub fn main() !void {
     std.debug.print("Type Store:\n{f}", .{check.typeStore});
     std.debug.print("************\n", .{});
     std.debug.print("Checked Expression(s):\n", .{});
-    for (checkedExprs) |expr| {
-        std.debug.print("- ", .{});
-        utils.prettyPrintCheckedExpression(&expr.*);
-    }
 
     irGen.dump();
 

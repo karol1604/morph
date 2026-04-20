@@ -142,6 +142,7 @@ pub const Parser = struct {
             .Identifier => try self.parseIdentifierOrFunctionCall(),
             .KwTrue, .KwFalse => try self.parseBoolLiteral(),
             .KwLet => try self.parseVariableDecl(),
+            .KwIf => try self.parseIfExpression(),
             .Plus, .Minus, .Bang => try self.parseUnaryExpression(),
             .LParen => try self.parseGroupExpression(),
             .LBrace => try self.parseBlockExpression(),
@@ -162,6 +163,32 @@ pub const Parser = struct {
             expr = try self.parseBinaryExpression(expr, semanticOp.?, self.getTokenPrec(opKind));
         }
         return expr;
+    }
+
+    fn parseIfExpression(self: *Parser) anyerror!*Expr {
+        const startSpan = self.currentToken().span;
+        self.advance(); // consume `if`
+
+        if (1 == 1) std.debug.print("Parsing if expression...\n", .{}) else return error.Unreachable; // sanity check to ensure this function is only called when the current token is `if`
+
+        const condition = try self.parseExpression(.Lowest);
+        const thenBranch = try self.parseExpression(.Lowest);
+
+        var elseBranch: ?*Expr = null;
+        if (self.currentToken().kind == .KwElse) {
+            self.advance(); // consume `else`
+            elseBranch = try self.parseExpression(.Lowest);
+        }
+
+        const endSpan = elseBranch orelse thenBranch;
+        return self.heapAlloc(Expr, .{
+            .kind = .{ .If = .{
+                .condition = condition,
+                .thenBranch = thenBranch,
+                .elseBranch = elseBranch,
+            } },
+            .span = Span.join(startSpan, endSpan.span),
+        });
     }
 
     fn parseFunctionTypeSignature(self: *Parser) !*Expr {

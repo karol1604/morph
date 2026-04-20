@@ -106,8 +106,63 @@ pub const Checker = struct {
             .FunctionTypeSignature => return try self.checkFunctionTypeSignature(expr),
             .FunctionDef => return try self.checkFunctionDef(expr),
             .FunctionCall => return try self.checkFunctionCall(expr, typeHint),
+            .If => return try self.checkIfExpression(expr, typeHint),
             // else => return error.Unimplemented,
         }
+    }
+
+    fn checkIfExpression(self: *Checker, expr: *const ast.Expr, typeHint: ?TypeId) !*CheckedExpr {
+        const ifExpr = expr.kind.If;
+
+        const conditionChecked = try self.checkExpr(ifExpr.condition, BOOL_TYPE_ID);
+
+        const thenChecked = try self.checkExpr(ifExpr.thenBranch, typeHint);
+
+        if (ifExpr.elseBranch == null and thenChecked.typeId != UNIT_TYPE_ID) {
+            self.ctx.reportError(
+                expr.span,
+                "if expression without else branch must have a Unit-typed body, got `{s}`",
+                .{self.typeStore.formatTypeName(thenChecked.typeId)},
+            );
+            return try self.typedExpr(
+                .{ .If = .{
+                    .condition = conditionChecked,
+                    .thenBranch = thenChecked,
+                    .elseBranch = null,
+                } },
+                ERROR_TYPE_ID,
+                typeHint,
+                expr.span,
+            );
+        }
+
+        var elseChecked: ?*CheckedExpr = null;
+        if (ifExpr.elseBranch) |elseBranch| {
+            elseChecked = try self.checkExpr(elseBranch, typeHint);
+
+            if (thenChecked.typeId != elseChecked.?.typeId) { // NOTE: we know there is en else branch
+                self.ctx.reportError(
+                    expr.span,
+                    "type mismatch between then and else branches: `{s}` vs `{s}`",
+                    .{
+                        self.typeStore.formatTypeName(thenChecked.typeId),
+                        self.typeStore.formatTypeName(elseChecked.?.typeId),
+                    },
+                );
+            }
+        }
+
+        const resultType = if (elseChecked) |_| thenChecked.typeId else UNIT_TYPE_ID;
+        return try self.typedExpr(
+            .{ .If = .{
+                .condition = conditionChecked,
+                .thenBranch = thenChecked,
+                .elseBranch = elseChecked,
+            } },
+            resultType,
+            typeHint,
+            expr.span,
+        );
     }
 
     fn checkFunctionCall(self: *Checker, expr: *const ast.Expr, typeHint: ?TypeId) !*CheckedExpr {

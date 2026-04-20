@@ -172,6 +172,9 @@ pub const Instr = union(enum) {
         callee: []const u8,
         args: []Operand,
     },
+    Jump: struct {
+        targetId: usize,
+    },
 
     pub fn format(self: Instr, writer: *std.io.Writer) !void {
         return switch (self) {
@@ -231,6 +234,7 @@ pub const Instr = union(enum) {
                 }
                 try writer.print(")\n", .{});
             },
+            .Jump => |j| try writer.print("jump Block {d}\n", .{j.targetId}),
         };
     }
 };
@@ -571,6 +575,54 @@ pub const IRGen = struct {
                 } });
 
                 return resultOp;
+            },
+            .If => |i| {
+                const condOp = try self.genExpr(i.condition);
+
+                const thenBlockId = try self.createBlock();
+                const mergeBlockId = try self.createBlock();
+
+                const elseBlockId = if (i.elseBranch) |_| try self.createBlock() else mergeBlockId;
+
+                self.setTerminator(.{ .ConditionalJump = .{
+                    .condition = condOp,
+                    .trueTarget = thenBlockId,
+                    .falseTarget = if (i.elseBranch) |_| elseBlockId else mergeBlockId,
+                } });
+
+                const ifResultTempId = self.nextId();
+                const resultOp = Operand{
+                    .value = .{ .Temp = ifResultTempId },
+                    .type = self.operandTypeFromTypeId(expr.typeId),
+                };
+
+                try self.switchToBlock(thenBlockId);
+                const thenOp = try self.genExpr(i.thenBranch);
+                if (i.elseBranch) |_| {
+                    try self.emit(Instr{ .Assign = .{
+                        .target = resultOp,
+                        .value = thenOp,
+                    } });
+                }
+                self.setTerminator(.{ .Jump = mergeBlockId });
+
+                if (i.elseBranch) |elseBranch| {
+                    try self.switchToBlock(elseBlockId);
+                    const elseOp = try self.genExpr(elseBranch);
+                    try self.emit(Instr{ .Assign = .{
+                        .target = resultOp,
+                        .value = elseOp,
+                    } });
+                    self.setTerminator(.{ .Jump = mergeBlockId });
+                }
+
+                // 7. continue in merge block
+                try self.switchToBlock(mergeBlockId);
+
+                if (i.elseBranch) |_| {
+                    return resultOp;
+                }
+                return Operand{ .value = .Unit, .type = .Unit };
             },
             // else => return error.Unimplemented,
         }

@@ -50,6 +50,12 @@ pub const ExprKind = union(enum) {
         callee: []const u8,
         args: []const *const Expr,
     },
+
+    If: struct {
+        condition: *const Expr,
+        thenBranch: *const Expr,
+        elseBranch: ?*const Expr,
+    },
 };
 
 pub const UnaryOperator = union(enum) {

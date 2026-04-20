@@ -61,4 +61,10 @@ pub const CheckedExprKind = union(enum) {
         args: []const *const CheckedExpr,
         id: usize, // unique id for this function call
     },
+
+    If: struct {
+        condition: *const CheckedExpr,
+        thenBranch: *const CheckedExpr,
+        elseBranch: ?*const CheckedExpr,
+    },
 };
