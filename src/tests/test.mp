@@ -39,4 +39,9 @@ let b = fib(10);
 let c = sumTo(10);
 let d = power(2, 8);
 
-a + b + c + d
+let res = a + b + c + d;
+if res > 255 {
+	1
+} else {
+	res
+}

@@ -100,34 +100,20 @@ pub const CodeGen = struct {
                     .Int => |i| try self.emit("    mov x0, #{d}\n", .{i}),
                     else => try self.loadOperand(op.value, "x0"),
                 }
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.target.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
                 try self.storeVariable(op.target.toString(), "x0");
             },
             .Add => |op| {
                 try self.emit("    ; add {f} = {f} + {f}\n", .{ op.result, op.left, op.right });
-
                 try self.loadOperand(op.left, "x0");
                 try self.loadOperand(op.right, "x1");
-
                 try self.emit("    add x0, x0, x1\n", .{});
-
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
                 try self.storeVariable(op.result.toString(), "x0");
             },
             .Sub => |op| {
                 try self.emit("    ; sub {f} = {f} - {f}\n", .{ op.result, op.left, op.right });
                 try self.loadOperand(op.left, "x0");
                 try self.loadOperand(op.right, "x1");
-
                 try self.emit("    sub x0, x0, x1\n", .{});
-
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
                 try self.storeVariable(op.result.toString(), "x0");
             },
             .Mul => |op| {
@@ -135,9 +121,6 @@ pub const CodeGen = struct {
                 try self.loadOperand(op.left, "x0");
                 try self.loadOperand(op.right, "x1");
                 try self.emit("    mul x0, x0, x1\n", .{});
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
                 try self.storeVariable(op.result.toString(), "x0");
             },
             .Div => |op| {
@@ -145,9 +128,6 @@ pub const CodeGen = struct {
                 try self.loadOperand(op.left, "x0");
                 try self.loadOperand(op.right, "x1");
                 try self.emit("    sdiv x0, x0, x1\n", .{});
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
                 try self.storeVariable(op.result.toString(), "x0");
             },
             .Call => |op| {
@@ -158,36 +138,32 @@ pub const CodeGen = struct {
                     try self.loadOperand(arg, reg);
                 }
                 try self.emit("    bl {s}\n", .{op.callee});
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
                 try self.storeVariable(op.result.toString(), "x0");
             },
-            .Lt => |op| {
-                try self.emit("    ; lt {f} = {f} < {f}\n", .{ op.result, op.left, op.right });
-                try self.loadOperand(op.left, "x0");
-                try self.loadOperand(op.right, "x1");
-                try self.emit("    cmp x0, x1\n", .{});
-                try self.emit("    cset x0, lt\n", .{});
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
-                try self.storeVariable(op.result.toString(), "x0");
-            },
-            .Eq => |op| {
-                try self.emit("    ; eq {f} = {f} == {f}\n", .{ op.result, op.left, op.right });
-                try self.loadOperand(op.left, "x0");
-                try self.loadOperand(op.right, "x1");
-                try self.emit("    cmp x0, x1\n", .{});
-                try self.emit("    cset x0, eq\n", .{});
-                // try self.emit("    str x0, [x29, #{d}]\n\n", .{self.currentStackOffset});
-                // try self.varToStackOffset.put(op.result.toString(), self.currentStackOffset);
-                // self.currentStackOffset -= 8;
-                try self.storeVariable(op.result.toString(), "x0");
-            },
+            .Eq => |op| try self.emitCondition(op.result, op.left, op.right, "eq"),
+            .Neq => |op| try self.emitCondition(op.result, op.left, op.right, "ne"),
+            .Lt => |op| try self.emitCondition(op.result, op.left, op.right, "lt"),
+            .LtEq => |op| try self.emitCondition(op.result, op.left, op.right, "le"),
+            .Gt => |op| try self.emitCondition(op.result, op.left, op.right, "gt"),
+            .GtEq => |op| try self.emitCondition(op.result, op.left, op.right, "ge"),
 
             else => @panic("Unsupported instruction type"),
         }
+    }
+
+    fn emitCondition(
+        self: *CodeGen,
+        result: ir.Operand,
+        left: ir.Operand,
+        right: ir.Operand,
+        cmpInstr: []const u8,
+    ) !void {
+        try self.emit("    ; {f} = {f} {s} {f}\n", .{ result, left, cmpInstr, right });
+        try self.loadOperand(left, "x0");
+        try self.loadOperand(right, "x1");
+        try self.emit("    cmp x0, x1\n", .{});
+        try self.emit("    cset x0, {s}\n", .{cmpInstr});
+        try self.storeVariable(result.toString(), "x0");
     }
 
     fn loadOperand(self: *CodeGen, operand: ir.Operand, reg: []const u8) !void {
