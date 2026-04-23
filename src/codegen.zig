@@ -3,6 +3,7 @@ const std = @import("std");
 const context = @import("context.zig");
 const Emitter = @import("emitters/emitter.zig").Emitter;
 const ir = @import("ir.zig");
+const liveness = @import("liveness.zig");
 const targ = @import("target.zig");
 
 pub const CodeGen = struct {
@@ -29,6 +30,11 @@ pub const CodeGen = struct {
 
         for (self.irGen.functions.items) |func| {
             try self.emitFunction(func);
+            const blockInfo = try liveness.analyze(&func, self.ctx.allocator);
+            std.debug.print("Liveness info for function {s}:\n", .{func.name});
+            for (blockInfo) |info| {
+                std.debug.print("{f}\n", .{info});
+            }
         }
     }
 
@@ -43,8 +49,6 @@ pub const CodeGen = struct {
 
     fn emitFunction(self: *CodeGen, func: ir.IRFunction) !void {
         self.currentStackOffset = -8; // reset stack offset for each function
-        // FIXME: this is horrid, we should just replace the # with something else in the IR
-        // const label = try std.mem.replaceOwned(u8, self.ctx.allocator, func.name, "#", "$");
         try self.emit("{s}:\n; param count: {d}\n", .{ func.name, func.params.items.len });
 
         self.currentFrameSize = CodeGen.calculateFrameSize(func);

@@ -199,11 +199,18 @@ pub const Checker = struct {
         const funcCall = expr.kind.FunctionCall;
         const funcSym = self.currentScope().lookupSymbol(funcCall.callee);
         if (funcSym == null) {
-            self.ctx.reportError(
-                expr.span,
-                "call to undeclared function `{s}`",
+            // self.ctx.reportError(
+            //     expr.span,
+            //     "call to undeclared function `{s}`",
+            //     .{funcCall.callee},
+            // );
+            var d = DiagnosticBuilder.err(self.ctx, "call to undeclared function `{s}`", .{funcCall.callee});
+            _ = d.primaryLabel(expr.span, "function call found here", .{})
+                .note(
+                "declare a function type signature like `{s} : <params> -> <return type>`",
                 .{funcCall.callee},
             );
+            d.emit();
             return try self.typedExpr(
                 .{
                     .FunctionCall = .{
@@ -233,8 +240,7 @@ pub const Checker = struct {
                 "function `{s}` expected {d} arguments, got {d}",
                 .{ funcCall.callee, paramTypes.len, funcCall.args.len },
             );
-            _ = d.primaryLabel(expr.span, "function call found here", .{});
-            d.emit();
+            d.primaryLabel(expr.span, "function call found here", .{}).emit();
         }
 
         var checkedArgs = try self.ctx.allocator.alloc(*CheckedExpr, funcCall.args.len);
@@ -578,7 +584,11 @@ pub const Checker = struct {
                 error.VariableAlreadyDeclared => {
                     // TODO: add secondary label pointing to the original declaration (when `Symbol` stores span)
                     const previous = self.currentScope().lookupSymbol(varDecl.name).?;
-                    var d = DiagnosticBuilder.err(self.ctx, "variable `{s}` already declared in this scope", .{varDecl.name});
+                    var d = DiagnosticBuilder.err(
+                        self.ctx,
+                        "variable `{s}` already declared in this scope",
+                        .{varDecl.name},
+                    );
                     _ = d.primaryLabel(expr.span, "redeclared here", .{});
                     _ = d.secondaryLabel(previous.span, "first declared here", .{});
                     d.emit();
