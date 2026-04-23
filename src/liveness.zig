@@ -12,6 +12,15 @@ pub const LiveInterval = struct {
     key: LivenessKey,
     start: usize, // instruction index of def
     end: usize, // instruction index of last use
+
+    pub fn format(self: LiveInterval, writer: *std.io.Writer) !void {
+        try writer.print("LiveInterval {{ ", .{});
+        switch (self.key) {
+            .Temp => |id| try writer.print("Temp(t{d}) ", .{id}),
+            .Var => |name| try writer.print("Var({s}) ", .{name}),
+        }
+        try writer.print("start: {d}, end: {d} }}\n", .{ self.start, self.end });
+    }
 };
 
 const LivenessKeyContext = struct {
@@ -92,13 +101,14 @@ pub const BlockInfo = struct {
     }
 };
 
-pub fn analyze(func: *const IRFunction, alloc: std.mem.Allocator) ![]BlockInfo {
+pub fn analyze(func: *const IRFunction, alloc: std.mem.Allocator) ![]LiveInterval {
     const blocks = try alloc.alloc(BlockInfo, func.blocks.items.len);
     numberInstructions(func, blocks, alloc);
-    buildCFG(func, blocks, alloc);
+    const indexMap = try buildBlockIndexMap(func, alloc);
+    buildCFG(func, blocks, alloc, indexMap);
     try computeUseDefSets(func, blocks);
     try computeLiveness(blocks, alloc);
-    return blocks;
+    return try buildIntervals(func, blocks, alloc);
 }
 
 fn numberInstructions(func: *const IRFunction, blocks: []BlockInfo, allocator: std.mem.Allocator) void {
@@ -120,7 +130,20 @@ fn numberInstructions(func: *const IRFunction, blocks: []BlockInfo, allocator: s
     }
 }
 
-fn buildCFG(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.Allocator) void {
+fn buildBlockIndexMap(func: *const IRFunction, alloc: std.mem.Allocator) !std.AutoHashMap(usize, usize) {
+    var map = std.AutoHashMap(usize, usize).init(alloc);
+    for (func.blocks.items, 0..) |block, localIdx| {
+        try map.put(block.id, localIdx);
+    }
+    return map;
+}
+
+fn buildCFG(
+    func: *const IRFunction,
+    blocks: []BlockInfo,
+    alloc: std.mem.Allocator,
+    indexMap: std.AutoHashMap(usize, usize),
+) void {
     for (func.blocks.items, 0..) |block, i| {
         const term = block.terminator.?; // TODO: is this safe?
         switch (term) {
@@ -129,13 +152,13 @@ fn buildCFG(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.Allocat
             },
             .Jump => |target| {
                 const s = alloc.alloc(usize, 1) catch @panic("allocation failed");
-                s[0] = target;
+                s[0] = indexMap.get(target).?; // get local index of target block
                 blocks[i].successors = s;
             },
             .ConditionalJump => |cj| {
                 const s = alloc.alloc(usize, 2) catch @panic("allocation failed");
-                s[0] = cj.trueTarget;
-                s[1] = cj.falseTarget;
+                s[0] = indexMap.get(cj.trueTarget).?;
+                s[1] = indexMap.get(cj.falseTarget).?;
                 blocks[i].successors = s;
             },
         }
@@ -185,18 +208,32 @@ fn operandToKey(op: ir.Operand) ?LivenessKey {
 fn computeUseDefSets(func: *const IRFunction, blocks: []BlockInfo) !void {
     for (func.blocks.items, 0..) |block, i| {
         for (block.instructions.items) |instr| {
-            const ops = instrInputsAndOutput(instr);
-            for (ops.inputs) |input| {
-                if (input) |op| {
-                    if (operandToKey(op)) |key| {
-                        if (!blocks[i].def.contains(key)) try blocks[i].use.put(key, {});
+            switch (instr) {
+                .Call => |call| {
+                    for (call.args) |arg| {
+                        if (operandToKey(arg)) |key| {
+                            if (!blocks[i].def.contains(key)) try blocks[i].use.put(key, {});
+                        }
                     }
-                }
-            }
-            if (ops.output) |op| {
-                if (operandToKey(op)) |key| {
-                    if (!blocks[i].use.contains(key)) try blocks[i].def.put(key, {});
-                }
+                    if (operandToKey(call.result)) |key| {
+                        if (!blocks[i].use.contains(key)) try blocks[i].def.put(key, {});
+                    }
+                },
+                else => {
+                    const ops = instrInputsAndOutput(instr);
+                    for (ops.inputs) |input| {
+                        if (input) |op| {
+                            if (operandToKey(op)) |key| {
+                                if (!blocks[i].def.contains(key)) try blocks[i].use.put(key, {});
+                            }
+                        }
+                    }
+                    if (ops.output) |op| {
+                        if (operandToKey(op)) |key| {
+                            if (!blocks[i].use.contains(key)) try blocks[i].def.put(key, {});
+                        }
+                    }
+                },
             }
         }
         if (block.terminator) |term| {
@@ -233,6 +270,118 @@ fn computeLiveness(blocks: []BlockInfo, alloc: std.mem.Allocator) !void {
             blocks[revIdx].liveIn = newLiveIn;
         }
     }
+}
+
+fn buildIntervals(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.Allocator) ![]LiveInterval {
+    var intervalMap = std.HashMap(
+        LivenessKey,
+        LiveInterval,
+        LivenessKeyContext,
+        std.hash_map.default_max_load_percentage,
+    ).init(alloc);
+    for (blocks, func.blocks.items) |blockInfo, irBlock| {
+        var it = blockInfo.liveIn.keyIterator();
+        while (it.next()) |key| {
+            const entry = try intervalMap.getOrPut(key.*);
+            if (!entry.found_existing) {
+                entry.value_ptr.* = LiveInterval{
+                    .key = key.*,
+                    .start = blockInfo.instrStart,
+                    .end = blockInfo.instrEnd,
+                };
+            } else {
+                entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instrEnd);
+            }
+        }
+
+        for (irBlock.instructions.items, 0..) |instr, i| {
+            const idx = blockInfo.instrStart + i;
+
+            switch (instr) {
+                .Call => |call| {
+                    // inputs: all args
+                    for (call.args) |arg| {
+                        if (operandToKey(arg)) |key| {
+                            const entry = try intervalMap.getOrPut(key);
+                            if (!entry.found_existing) {
+                                entry.value_ptr.* = .{ .key = key, .start = idx, .end = idx };
+                            } else {
+                                entry.value_ptr.end = @max(entry.value_ptr.end, idx);
+                            }
+                        }
+                    }
+                    // output: result
+                    if (operandToKey(call.result)) |key| {
+                        const entry = try intervalMap.getOrPut(key);
+                        if (!entry.found_existing) {
+                            entry.value_ptr.* = .{ .key = key, .start = idx, .end = idx };
+                        }
+                    }
+                },
+                else => {
+                    const ops = instrInputsAndOutput(instr);
+
+                    for (ops.inputs) |maybeInput| {
+                        if (maybeInput) |op| {
+                            if (operandToKey(op)) |key| {
+                                const entry = try intervalMap.getOrPut(key);
+                                if (!entry.found_existing) {
+                                    entry.value_ptr.* = LiveInterval{
+                                        .key = key,
+                                        .start = idx,
+                                        .end = idx,
+                                    };
+                                } else {
+                                    entry.value_ptr.end = @max(entry.value_ptr.end, idx);
+                                }
+                            }
+                        }
+                    }
+
+                    if (ops.output) |op| {
+                        if (operandToKey(op)) |key| {
+                            const entry = try intervalMap.getOrPut(key);
+                            if (!entry.found_existing) {
+                                entry.value_ptr.* = LiveInterval{
+                                    .key = key,
+                                    .start = idx,
+                                    .end = idx,
+                                };
+                            }
+                            // entry.value_ptr.end = @max(entry.value_ptr.end, idx);
+                        }
+                    }
+                },
+            }
+        }
+
+        if (irBlock.terminator) |term| {
+            if (terminatorInput(term)) |op| {
+                if (operandToKey(op)) |key| {
+                    const entry = try intervalMap.getOrPut(key);
+                    if (!entry.found_existing) {
+                        entry.value_ptr.* = LiveInterval{
+                            .key = key,
+                            .start = blockInfo.instrEnd, // terminator is after all instructions
+                            .end = blockInfo.instrEnd,
+                        };
+                    } else {
+                        entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instrEnd);
+                    }
+                }
+            }
+        }
+    }
+
+    var result = try alloc.alloc(LiveInterval, intervalMap.count());
+    var it2 = intervalMap.valueIterator();
+    var idx: usize = 0;
+    while (it2.next()) |entry| {
+        result[idx] = entry.*;
+        idx += 1;
+    }
+
+    return result;
 }
 
 fn mapUnion(a: LivenessSet, b: LivenessSet, alloc: std.mem.Allocator) !LivenessSet {

@@ -1,10 +1,11 @@
 let x = 1;
 let y = 2;
 
-x + y;
+add: Int × Int -> Int;
+add(a, b) => a + b;
 
 if x == y {
-	67
+	add(34, 33)
 } else {
-	69
+	add(34, 34)
 }
