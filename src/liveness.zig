@@ -221,9 +221,13 @@ fn computeLiveness(blocks: []BlockInfo, alloc: std.mem.Allocator) !void {
             }
 
             var newLiveIn = LivenessSet.init(alloc);
-            newLiveIn = try mapUnion(blocks[revIdx].use, try mapSubstraction(newLiveOut, blocks[revIdx].def, alloc), alloc);
+            newLiveIn = try mapUnion(
+                blocks[revIdx].use,
+                try mapSubstraction(newLiveOut, blocks[revIdx].def, alloc),
+                alloc,
+            );
 
-            changed = !setsEqual(newLiveOut, blocks[revIdx].liveOut) or !setsEqual(newLiveIn, blocks[revIdx].liveIn);
+            changed = changed or !setsEqual(newLiveOut, blocks[revIdx].liveOut) or !setsEqual(newLiveIn, blocks[revIdx].liveIn);
 
             blocks[revIdx].liveOut = newLiveOut;
             blocks[revIdx].liveIn = newLiveIn;
