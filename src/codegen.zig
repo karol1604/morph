@@ -36,9 +36,9 @@ pub const CodeGen = struct {
         const file = try std.fs.cwd().createFile(path, .{});
         defer file.close();
         try file.writeAll(self.output.items);
-        for (self.output.items) |byte| {
-            std.debug.print("{c}", .{byte});
-        }
+        // for (self.output.items) |byte| {
+        //     std.debug.print("{c}", .{byte});
+        // }
     }
 
     fn emitFunction(self: *CodeGen, func: ir.IRFunction) !void {
@@ -169,6 +169,7 @@ pub const CodeGen = struct {
     fn loadOperand(self: *CodeGen, operand: ir.Operand, reg: []const u8) !void {
         switch (operand.value) {
             .Int => |i| try self.emit("    mov {s}, #{d}\n", .{ reg, i }),
+            .Bool => |b| try self.emit("    mov {s}, #{d}\n", .{ reg, @intFromBool(b) }),
             .Variable => |name| {
                 const offset = self.varToStackOffset.get(name) orelse unreachable;
                 try self.emit("    ldr {s}, [x29, #{d}] ; load {s}\n", .{ reg, offset, name });
@@ -242,8 +243,7 @@ pub const CodeGen = struct {
             for (block.instructions.items) |instr| {
                 switch (instr) {
                     // TODO: dont forget about the rest
-                    .Assign, .Add, .Sub, .Mul, .Div, .Call => count += 1,
-                    else => {},
+                    .Assign, .Add, .Sub, .Mul, .Div, .Call, .Eq, .Neq, .Lt, .LtEq, .Gt, .GtEq, .UnaryMinus => count += 1,
                 }
             }
         }

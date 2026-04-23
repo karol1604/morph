@@ -1,5 +1,6 @@
 const std = @import("std");
 pub const TypeId = usize;
+const Span = @import("span.zig").Span;
 
 pub const Type = union(enum) {
     Named: []const u8,
@@ -141,4 +142,6 @@ pub const Symbol = struct {
         Variable,
         Function,
     },
+    span: Span,
+    codomainSpan: ?Span, // Only used for functions to indicate the return type annotation span
 };

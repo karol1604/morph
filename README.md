@@ -10,14 +10,14 @@ module Physics;
 // Type Aliases using Unicode
 type Vector2 = ℝ × ℝ;
 
-magnitude : Vector2 ⇒ ℝ;
+magnitude : Vector2 -> ℝ;
 magnitude(v) = {
     val (x, y) = v;
     sqrt(x^2 + y^2)
 }
 
 // Block logic with implicit returns
-classify : ℝ ⇒ ℤ;
+classify : ℝ -> ℤ;
 classify(n) = {
     check {
         | n > 0.0 ⇒ 1;  // Positive
@@ -26,3 +26,8 @@ classify(n) = {
     }
 }
 ```
+
+## Planned features
+- Stronger type inference (Hindley-Milner or something similar)
+- Algebraic data types and strong pattern matching
+- Lazy evaluation and infinite data structures

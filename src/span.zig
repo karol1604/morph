@@ -17,7 +17,7 @@ pub const Span = struct {
         };
     }
 
-    pub fn format(self: Span, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+    pub fn format(self: Span, writer: *std.io.Writer) !void {
         try writer.print("{d}:{d}..{d}:{d} (offset: [{d}..{d}])", .{
             self.start.line,
             self.start.col,

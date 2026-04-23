@@ -1,10 +1,12 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const TypeId = @import("type_store.zig").TypeId;
+const Span = @import("span.zig").Span;
 
 pub const CheckedExpr = struct {
     typeId: TypeId,
     kind: CheckedExprKind,
+    span: Span,
 };
 
 pub const Param = struct {

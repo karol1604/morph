@@ -1,28 +1,21 @@
 const std = @import("std");
+
+const checker = @import("checker.zig");
+const codegen = @import("codegen.zig");
 const context = @import("context.zig");
+const CompilerContext = context.CompilerContext;
+const ir = @import("ir.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
-const checker = @import("checker.zig");
-const ir = @import("ir.zig");
+const Span = @import("span.zig").Span;
+const targ = @import("target.zig");
 const parserTests = @import("tests/parser.zig");
 const utils = @import("utils.zig");
-const Span = @import("span.zig").Span;
-const CompilerContext = context.CompilerContext;
-const codegen = @import("codegen.zig");
-const targ = @import("target.zig");
+const zspan = @import("zspan");
 
-fn printDiagnostics(ctx: *CompilerContext) void {
+fn printDiagnostics(ctx: *CompilerContext, writer: *std.io.Writer) !void {
     for (ctx.diagnostics.items) |diag| {
-        std.debug.print(
-            "<input>:{d}:{d}: {t}: {s}\n",
-            .{
-                diag.span.start.line,
-                diag.span.start.col,
-                diag.severity,
-                diag.message,
-            },
-        );
-        printSnippet(ctx.source, diag.span, 2);
+        try zspan.displayDiagnostic(diag, &[_]zspan.SourceFile{ctx.sourceFile}, writer, ctx.allocator);
     }
 }
 
@@ -103,7 +96,7 @@ pub fn main() !void {
     // add : ℕ × ℕ -> ℕ;
     // add(x, y) => x + y;
 
-    var ctx = context.CompilerContext.init(&arena, source);
+    var ctx = context.CompilerContext.init(&arena, source, "test.mp");
     defer ctx.deinit();
 
     var lex = lexer.Lexer.init(&ctx) catch return error.LexerInitFailed;
@@ -126,9 +119,14 @@ pub fn main() !void {
     var check = try checker.Checker.init(&ctx, exprs);
     const checkedExprs = try check.check();
 
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     if (ctx.hasErrors()) {
         std.debug.print("\nCompilation failed with errors:\n", .{});
-        printDiagnostics(&ctx);
+        try printDiagnostics(&ctx, stdout);
+        try stdout.flush();
         return error.CompilationFailed;
     }
 
@@ -172,7 +170,7 @@ fn assembleAndLink(allocator: std.mem.Allocator, asmPath: []const u8, outPath: [
     const objPath = "/tmp/out.o";
     const asResult = try std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &.{ "as", "-o", objPath, asmPath },
+        .argv = &.{ "as", "-g", "-o", objPath, asmPath },
     });
     if (asResult.term.Exited != 0) {
         std.debug.print("Assembler error:\n{s}\n", .{asResult.stderr});

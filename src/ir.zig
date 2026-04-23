@@ -172,9 +172,6 @@ pub const Instr = union(enum) {
         callee: []const u8,
         args: []Operand,
     },
-    Jump: struct {
-        targetId: usize,
-    },
 
     pub fn format(self: Instr, writer: *std.io.Writer) !void {
         return switch (self) {
@@ -234,7 +231,6 @@ pub const Instr = union(enum) {
                 }
                 try writer.print(")\n", .{});
             },
-            .Jump => |j| try writer.print("jump Block {d}\n", .{j.targetId}),
         };
     }
 };
@@ -268,7 +264,9 @@ pub const IRGen = struct {
                 _ = try self.genExpr(expr);
             }
             const last = try self.genExpr(exprs[exprs.len - 1]);
-            if (last.type == .Int) break :blk last;
+            if (last.type == .Int or last.type == .Bool) break :blk last;
+
+            // NOTE: for now, we accept Bool as exit code (false: 0, true: 1)
             break :blk Operand{ .value = .{ .Int = 0 }, .type = .Int };
         } else Operand{ .value = .{ .Int = 0 }, .type = .Int };
 
@@ -527,6 +525,7 @@ pub const IRGen = struct {
             .FunctionDecl => |func| {
                 const prevFuncIdx = self.currentFuncIdx;
                 const prevBlockIdx = self.currentBlockIdx;
+                // const prevVarCount = self.variables.items.len;
 
                 try self.createFunction(func.name, func.id);
 
@@ -546,6 +545,7 @@ pub const IRGen = struct {
 
                 // try self.emit(Instr{ .Ret = .{ .value = bodyOp } });
 
+                // self.variables.shrinkRetainingCapacity(prevVarCount);
                 self.currentFuncIdx = prevFuncIdx;
                 self.currentBlockIdx = prevBlockIdx;
 
