@@ -1,5 +1,4 @@
 let x = 1;
-let y = 2;
-let z = x + y + 67;
+let y = x * 2;
 
-z
+y

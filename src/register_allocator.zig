@@ -29,7 +29,26 @@ pub const Register = struct {
     }
 };
 
+pub const ARGUMENT_REGISTERS = [_]Register{
+    .{ .name = .x0, .kind = .CallerSaved },
+    .{ .name = .x1, .kind = .CallerSaved },
+    .{ .name = .x2, .kind = .CallerSaved },
+    .{ .name = .x3, .kind = .CallerSaved },
+    .{ .name = .x4, .kind = .CallerSaved },
+    .{ .name = .x5, .kind = .CallerSaved },
+    .{ .name = .x6, .kind = .CallerSaved },
+    .{ .name = .x7, .kind = .CallerSaved },
+};
+
 pub const ALLOCATABLE = [_]Register{
+    .{ .name = .x0, .kind = .CallerSaved },
+    .{ .name = .x1, .kind = .CallerSaved },
+    .{ .name = .x2, .kind = .CallerSaved },
+    .{ .name = .x3, .kind = .CallerSaved },
+    .{ .name = .x4, .kind = .CallerSaved },
+    .{ .name = .x5, .kind = .CallerSaved },
+    .{ .name = .x6, .kind = .CallerSaved },
+    .{ .name = .x7, .kind = .CallerSaved },
     // caller-saved, non-argument
     .{ .name = .x9, .kind = .CallerSaved },
     .{ .name = .x10, .kind = .CallerSaved },
@@ -104,6 +123,8 @@ pub const RegisterAllocator = struct {
         RegisterAllocator.sortLiveIntervals(self.intervals);
 
         for (self.intervals) |interval| {
+            if (self.allocations.contains(interval.key)) continue;
+
             try self.expireOldIntervals(interval);
 
             if (self.availableRegisters.items.len == 0) {
@@ -151,7 +172,7 @@ pub const RegisterAllocator = struct {
     fn expireOldIntervals(self: *RegisterAllocator, current: liveness.LiveInterval) !void {
         while (self.activeIntervals.items.len > 0) {
             const active = self.activeIntervals.items[0];
-            if (active.end >= current.start) return;
+            if (active.end > current.start) return;
             _ = self.activeIntervals.orderedRemove(0);
             if (self.allocations.get(active.key)) |r| {
                 try self.availableRegisters.append(self.alloc, r.Reg);
@@ -175,6 +196,7 @@ pub const RegisterAllocator = struct {
                 .replacedBy = interval.key,
             } });
 
+            // NOTE: this works but note for future me
             _ = self.activeIntervals.swapRemove(self.activeIntervals.items.len - 1);
             try self.insertSortedByEndIntoActive(interval);
         } else {
@@ -191,7 +213,7 @@ pub const RegisterAllocator = struct {
         return slot;
     }
 
-    fn insertSortedByEndIntoActive(self: *RegisterAllocator, interval: liveness.LiveInterval) !void {
+    pub fn insertSortedByEndIntoActive(self: *RegisterAllocator, interval: liveness.LiveInterval) !void {
         var i: usize = 0;
         while (i < self.activeIntervals.items.len) : (i += 1) {
             if (self.activeIntervals.items[i].end > interval.end) break;
@@ -202,7 +224,7 @@ pub const RegisterAllocator = struct {
     fn sortLiveIntervals(intervals: []liveness.LiveInterval) void {
         std.sort.block(liveness.LiveInterval, intervals, {}, compareLiveIntervals);
         for (intervals) |interval| {
-            std.debug.print("live interval: {f}", .{interval});
+            std.debug.print("live interval: {f}\n", .{interval});
         }
     }
 };

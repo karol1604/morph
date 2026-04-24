@@ -26,7 +26,7 @@ pub const LiveInterval = struct {
             .Temp => |id| try writer.print("Temp(t{d}) ", .{id}),
             .Var => |name| try writer.print("Var({s}) ", .{name}),
         }
-        try writer.print("start: {d}, end: {d} }}\n", .{ self.start, self.end });
+        try writer.print("start: {d}, end: {d} }}", .{ self.start, self.end });
     }
 };
 
