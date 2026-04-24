@@ -5,6 +5,7 @@ const Emitter = @import("emitters/emitter.zig").Emitter;
 const ir = @import("ir.zig");
 const liveness = @import("liveness.zig");
 const targ = @import("target.zig");
+const RegisterAllocator = @import("register_allocator.zig").RegisterAllocator;
 
 pub const CodeGen = struct {
     ctx: *context.CompilerContext,
@@ -30,11 +31,14 @@ pub const CodeGen = struct {
 
         for (self.irGen.functions.items) |func| {
             try self.emitFunction(func);
-            const blockInfo = try liveness.analyze(&func, self.ctx.allocator);
+            const liveIntervals = try liveness.analyze(&func, self.ctx.allocator);
             std.debug.print("Liveness info for function {s}:\n", .{func.name});
-            for (blockInfo) |info| {
+            for (liveIntervals) |info| {
                 std.debug.print("{f}\n", .{info});
             }
+
+            var regAlloc = try RegisterAllocator.init(liveIntervals, self.ctx.allocator);
+            try regAlloc.allocate();
         }
     }
 

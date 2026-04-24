@@ -23,7 +23,7 @@ pub const LiveInterval = struct {
     }
 };
 
-const LivenessKeyContext = struct {
+pub const LivenessKeyContext = struct {
     pub fn hash(_: LivenessKeyContext, key: LivenessKey) u64 {
         var hasher = std.hash.Wyhash.init(0);
         switch (key) {
