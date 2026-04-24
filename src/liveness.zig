@@ -6,6 +6,13 @@ const IRFunction = ir.IRFunction;
 pub const LivenessKey = union(enum) {
     Temp: usize,
     Var: []const u8,
+
+    pub fn format(self: LivenessKey, writer: *std.io.Writer) !void {
+        switch (self) {
+            .Temp => |id| try writer.print("Temp(t{d})", .{id}),
+            .Var => |name| try writer.print("Var({s})", .{name}),
+        }
+    }
 };
 
 pub const LiveInterval = struct {

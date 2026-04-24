@@ -39,6 +39,7 @@ pub const CodeGen = struct {
 
             var regAlloc = try RegisterAllocator.init(liveIntervals, self.ctx.allocator);
             try regAlloc.allocate();
+            regAlloc.dumpLog();
         }
     }
 
