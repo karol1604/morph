@@ -13,7 +13,7 @@ const parserTests = @import("tests/parser.zig");
 const utils = @import("utils.zig");
 const zspan = @import("zspan");
 
-fn printDiagnostics(ctx: *CompilerContext, writer: *std.io.Writer) !void {
+fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
     for (ctx.diagnostics.items) |diag| {
         try zspan.displayDiagnostic(diag, &[_]zspan.SourceFile{ctx.sourceFile}, writer, ctx.allocator);
     }
@@ -78,7 +78,7 @@ fn printSnippet(source: []const u8, span: Span, context_lines: usize) void {
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     // const source = "ℕ";
     // const source = "let ℕ = a != true;";
@@ -91,6 +91,7 @@ pub fn main() !void {
     //     \\let Int = 1;
     //     \\add(x, y) => x + y;;
     // ;
+    const io = init.io;
     const source = @embedFile("tests/test.mp");
 
     // add : ℕ × ℕ -> ℕ;
@@ -120,7 +121,7 @@ pub fn main() !void {
     const checkedExprs = try check.check();
 
     var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
     if (ctx.hasErrors()) {
@@ -152,8 +153,8 @@ pub fn main() !void {
 
     const asmPath = "/Users/karol/projects/morph/tmp/out.s";
     const binPath = "/Users/karol/projects/morph/tmp/out";
-    try codeGen.writeToFile(asmPath);
-    try assembleAndLink(arena.allocator(), asmPath, binPath);
+    try codeGen.writeToFile(asmPath, io);
+    try assembleAndLink(io, arena.allocator(), asmPath, binPath);
 
     // std.debug.print("Generated IR({d}):\n", .{instructions.len});
     // for (instructions) |instr| {
@@ -165,22 +166,25 @@ test "Tests" {
     std.testing.refAllDecls(parserTests);
 }
 
-fn assembleAndLink(allocator: std.mem.Allocator, asmPath: []const u8, outPath: []const u8) !void {
+fn assembleAndLink(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    asmPath: []const u8,
+    outPath: []const u8,
+) !void {
     // assemble
     const objPath = "/tmp/out.o";
-    const asResult = try std.process.Child.run(.{
-        .allocator = allocator,
+    const asResult = try std.process.run(allocator, io, .{
         .argv = &.{ "as", "-g", "-o", objPath, asmPath },
     });
-    if (asResult.term.Exited != 0) {
+    if (asResult.term.exited != 0) {
         std.debug.print("Assembler error:\n{s}\n", .{asResult.stderr});
         return error.AssemblerFailed;
     }
 
     // link
-    const sdkPath = try getSdkPath(allocator);
-    const ldResult = try std.process.Child.run(.{
-        .allocator = allocator,
+    const sdkPath = try getSdkPath(io, allocator);
+    const ldResult = try std.process.run(allocator, io, .{
         .argv = &.{
             "ld",
             "-o",
@@ -195,7 +199,7 @@ fn assembleAndLink(allocator: std.mem.Allocator, asmPath: []const u8, outPath: [
             "arm64",
         },
     });
-    if (ldResult.term.Exited != 0) {
+    if (ldResult.term.exited != 0) {
         std.debug.print("Linker error:\n{s}\n", .{ldResult.stderr});
         return error.LinkerFailed;
     }
@@ -203,11 +207,10 @@ fn assembleAndLink(allocator: std.mem.Allocator, asmPath: []const u8, outPath: [
     std.debug.print("Binary written to {s}\n", .{outPath});
 }
 
-fn getSdkPath(allocator: std.mem.Allocator) ![]const u8 {
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
+fn getSdkPath(io: std.Io, allocator: std.mem.Allocator) ![]const u8 {
+    const result = try std.process.run(allocator, io, .{
         .argv = &.{ "xcrun", "--sdk", "macosx", "--show-sdk-path" },
     });
     // trim the trailing newline
-    return std.mem.trimRight(u8, result.stdout, "\n");
+    return std.mem.trimEnd(u8, result.stdout, "\n");
 }

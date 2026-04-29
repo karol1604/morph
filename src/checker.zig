@@ -225,6 +225,28 @@ pub const Checker = struct {
             );
         }
 
+        if (funcSym.?.kind != .Function) {
+            var d = DiagnosticBuilder.err(self.ctx, "symbol `{s}` is not a function", .{funcCall.callee});
+            _ = d.primaryLabel(expr.span, "call found here", .{})
+                .note(
+                "`{s}` is of type `{s}`",
+                .{ funcCall.callee, self.typeStore.formatTypeName(funcSym.?.typeId) },
+            );
+            d.emit();
+            return try self.typedExpr(
+                .{
+                    .FunctionCall = .{
+                        .callee = funcCall.callee,
+                        .args = &[_]*const CheckedExpr{},
+                        .id = 0, // NOTE: id doesn't matter since it's error-typed
+                    },
+                },
+                ERROR_TYPE_ID,
+                typeExp,
+                expr.span,
+            );
+        }
+
         const domainId = self.typeStore.types.items[funcSym.?.typeId].Function.domain;
         const codomainId = self.typeStore.types.items[funcSym.?.typeId].Function.codomain;
 
@@ -310,6 +332,7 @@ pub const Checker = struct {
         std.debug.print("\n", .{});
 
         try self.enterNewScope();
+        defer self.exitScope();
 
         for (params, 0..) |paramTypeId, idx| {
             const paramName = funcDef.params[idx];
@@ -337,8 +360,6 @@ pub const Checker = struct {
             .reason = "declared return type here",
         };
         const bodyChecked = try self.checkExpr(funcDef.body, returnExpectation);
-
-        self.exitScope();
 
         return try self.typedExpr(
             .{ .FunctionDecl = .{
@@ -478,7 +499,9 @@ pub const Checker = struct {
 
     fn checkBlock(self: *Checker, expr: *const ast.Expr, typeExp: ?TypeExpectation) !*CheckedExpr {
         const block = expr.kind.Block;
+
         try self.enterNewScope();
+        defer self.exitScope();
 
         var checkedStmts = try self.ctx.allocator.alloc(*CheckedExpr, block.stmts.len);
         for (block.stmts, 0..) |stmt, idx| {
@@ -489,8 +512,6 @@ pub const Checker = struct {
         if (block.tail) |tailExpr| {
             tailChecked = try self.checkExpr(tailExpr, typeExp);
         }
-
-        self.exitScope();
 
         return try self.typedExpr(
             .{ .Block = .{
@@ -612,7 +633,10 @@ pub const Checker = struct {
 
     fn declareVariable(self: *Checker, name: []const u8, typeId: TypeId, id: usize, span: Span) !void {
         const scope = self.currentScope();
-        if (scope.lookupSymbol(name)) |_| {
+        // if (scope.lookupSymbol(name)) |_| {
+        //     return error.VariableAlreadyDeclared;
+        // }
+        if (scope.symbols.contains(name)) {
             return error.VariableAlreadyDeclared;
         }
 

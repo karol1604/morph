@@ -29,7 +29,7 @@ pub const TypeStore = struct {
         };
     }
 
-    pub fn format(self: TypeStore, writer: *std.io.Writer) !void {
+    pub fn format(self: TypeStore, writer: *std.Io.Writer) !void {
         for (self.types.items, 0..) |typ, id| {
             switch (typ) {
                 .Named => try writer.print("{s} [{d}]\n", .{ typ.Named, id }),

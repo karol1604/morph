@@ -5,7 +5,7 @@ pub const Arch = enum {
     x86_64,
     aarch64,
 
-    pub fn format(self: Arch, writer: *std.io.Writer) !void {
+    pub fn format(self: Arch, writer: *std.Io.Writer) !void {
         return switch (self) {
             .x86_64 => writer.print("x86_64", .{}),
             .aarch64 => writer.print("aarch64", .{}),
@@ -17,7 +17,7 @@ pub const OS = enum {
     linux,
     macos,
 
-    pub fn format(self: OS, writer: *std.io.Writer) !void {
+    pub fn format(self: OS, writer: *std.Io.Writer) !void {
         return switch (self) {
             .linux => writer.print("linux", .{}),
             .macos => writer.print("macos", .{}),

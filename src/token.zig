@@ -46,7 +46,7 @@ pub const TokenType = union(enum) {
 
     Eof,
 
-    pub fn format(self: TokenType, writer: *std.io.Writer) !void {
+    pub fn format(self: TokenType, writer: *std.Io.Writer) !void {
         switch (self) {
             .Plus => try writer.print("+", .{}),
             .Minus => try writer.print("-", .{}),
@@ -87,8 +87,8 @@ pub const TokenType = union(enum) {
             .GreaterThanOrEqual => try writer.print(">=", .{}),
             .DoubleEqual => try writer.print("==", .{}),
 
-            .Identifier => |_| try writer.print("Ident", .{}),
-            .IntLiteral => |_| try writer.print("IntLiteral", .{}),
+            .Identifier => try writer.print("Ident", .{}),
+            .IntLiteral => try writer.print("IntLiteral", .{}),
             .Eof => try writer.print("EOF", .{}),
         }
     }
@@ -98,7 +98,7 @@ pub const Token = struct {
     kind: TokenType,
     span: span.Span,
 
-    pub fn format(self: Token, writer: *std.io.Writer) !void {
+    pub fn format(self: Token, writer: *std.Io.Writer) !void {
         switch (self.kind) {
             .Identifier => |val| try writer.print("TOK_IDENT({s})", .{val}),
             .IntLiteral => |val| try writer.print("TOK_INT_LIT({d})", .{val}),

@@ -17,7 +17,7 @@ pub const Span = struct {
         };
     }
 
-    pub fn format(self: Span, writer: *std.io.Writer) !void {
+    pub fn format(self: Span, writer: *std.Io.Writer) !void {
         try writer.print("{d}:{d}..{d}:{d} (offset: [{d}..{d}])", .{
             self.start.line,
             self.start.col,

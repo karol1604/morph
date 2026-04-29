@@ -7,7 +7,7 @@ pub const LivenessKey = union(enum) {
     Temp: usize,
     Var: []const u8,
 
-    pub fn format(self: LivenessKey, writer: *std.io.Writer) !void {
+    pub fn format(self: LivenessKey, writer: *std.Io.Writer) !void {
         switch (self) {
             .Temp => |id| try writer.print("Temp(t{d})", .{id}),
             .Var => |name| try writer.print("Var({s})", .{name}),
@@ -20,7 +20,7 @@ pub const LiveInterval = struct {
     start: usize, // instruction index of def
     end: usize, // instruction index of last use
 
-    pub fn format(self: LiveInterval, writer: *std.io.Writer) !void {
+    pub fn format(self: LiveInterval, writer: *std.Io.Writer) !void {
         try writer.print("LiveInterval {{ ", .{});
         switch (self.key) {
             .Temp => |id| try writer.print("Temp(t{d}) ", .{id}),
@@ -72,7 +72,7 @@ pub const BlockInfo = struct {
     instrStart: usize, // index of first instruction in block
     instrEnd: usize, // index of last instruction in block
 
-    pub fn format(self: BlockInfo, writer: *std.io.Writer) !void {
+    pub fn format(self: BlockInfo, writer: *std.Io.Writer) !void {
         try writer.print("  instrs: [{d}, {d}]\n", .{ self.instrStart, self.instrEnd });
 
         try writer.print("  successors: [", .{});
@@ -95,7 +95,7 @@ pub const BlockInfo = struct {
         try formatKeySet(self.liveOut, writer);
     }
 
-    fn formatKeySet(set: LivenessSet, writer: *std.io.Writer) !void {
+    fn formatKeySet(set: LivenessSet, writer: *std.Io.Writer) !void {
         try writer.print("{{ ", .{});
         var it = set.keyIterator();
         while (it.next()) |key| {

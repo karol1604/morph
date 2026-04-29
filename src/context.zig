@@ -36,7 +36,7 @@ pub const CompilerContext = struct {
         labels[0] = zspan.Label.primary(span.start.offset, span.end.offset, "", 0); // FIXME: temporary
 
         self.diagnostics.append(self.allocator, .{
-            .severity = .Error,
+            .severity = .@"error",
             .message = msg,
             .labels = labels,
             .notes = &.{},
@@ -45,7 +45,7 @@ pub const CompilerContext = struct {
 
     pub fn hasErrors(self: *const CompilerContext) bool {
         for (self.diagnostics.items) |d| {
-            if (d.severity == .Error) return true;
+            if (d.severity == .@"error") return true;
         }
         return false;
     }

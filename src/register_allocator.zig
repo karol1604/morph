@@ -24,7 +24,7 @@ pub const Register = struct {
         CalleeSaved,
     },
 
-    pub fn format(self: Register, writer: *std.io.Writer) !void {
+    pub fn format(self: Register, writer: *std.Io.Writer) !void {
         try writer.print("{s}", .{self.name.toString()});
     }
 };
@@ -74,7 +74,7 @@ pub const Allocation = union(enum) {
     Reg: Register,
     Spill: usize, // stack slot index
 
-    pub fn format(self: Allocation, writer: *std.io.Writer) !void {
+    pub fn format(self: Allocation, writer: *std.Io.Writer) !void {
         switch (self) {
             .Reg => |reg| try reg.format(writer),
             .Spill => |slot| try writer.print("spill{d}", .{slot}),

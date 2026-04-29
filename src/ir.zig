@@ -27,7 +27,7 @@ pub const Operand = struct {
     value: Value,
     type: OperandType,
 
-    pub fn format(self: Operand, writer: *std.io.Writer) !void {
+    pub fn format(self: Operand, writer: *std.Io.Writer) !void {
         return switch (self.value) {
             .Temp => |id| try writer.print("t{d}", .{id}),
             .Unit => try writer.print("()", .{}),
@@ -60,7 +60,7 @@ pub const Terminator = union(enum) {
         falseTarget: usize,
     },
 
-    pub fn format(self: Terminator, writer: *std.io.Writer) !void {
+    pub fn format(self: Terminator, writer: *std.Io.Writer) !void {
         return switch (self) {
             .Return => |value| try writer.print("return {f}", .{value}),
             .Exit => |code| try writer.print("exit {f}", .{code}),
@@ -78,7 +78,7 @@ pub const BasicBlock = struct {
     instructions: std.ArrayList(Instr) = .empty,
     terminator: ?Terminator = null,
 
-    pub fn format(self: BasicBlock, writer: *std.io.Writer) !void {
+    pub fn format(self: BasicBlock, writer: *std.Io.Writer) !void {
         try writer.print("Block {d}:\n", .{self.id});
         for (self.instructions.items) |instr| {
             try writer.print("\t{f}", .{instr});
@@ -100,7 +100,7 @@ pub const IRFunction = struct {
     blocks: std.ArrayList(BasicBlock) = .empty,
     entryBlockId: usize,
 
-    pub fn format(self: IRFunction, writer: *std.io.Writer) !void {
+    pub fn format(self: IRFunction, writer: *std.Io.Writer) !void {
         try writer.print("Function {s}:\n", .{self.name});
         for (self.blocks.items) |block| {
             try writer.print("    {f}\n", .{block});
@@ -173,7 +173,7 @@ pub const Instr = union(enum) {
         args: []Operand,
     },
 
-    pub fn format(self: Instr, writer: *std.io.Writer) !void {
+    pub fn format(self: Instr, writer: *std.Io.Writer) !void {
         return switch (self) {
             .Add => |a| try writer.print(
                 "{f} := {f} + {f}\n",

@@ -1,7 +1,9 @@
 const std = @import("std");
-const Span = @import("span.zig").Span;
-const CompilerContext = @import("context.zig").CompilerContext;
+
 const zspan = @import("zspan");
+
+const CompilerContext = @import("context.zig").CompilerContext;
+const Span = @import("span.zig").Span;
 
 pub const DiagnosticBuilder = struct {
     ctx: *CompilerContext,
@@ -13,7 +15,7 @@ pub const DiagnosticBuilder = struct {
     pub fn err(ctx: *CompilerContext, comptime fmt: []const u8, args: anytype) DiagnosticBuilder {
         return .{
             .ctx = ctx,
-            .severity = .Error,
+            .severity = .@"error",
             .message = std.fmt.allocPrint(ctx.allocator, fmt, args) catch "Failed to format diagnostic message",
             .labels = .empty,
             .notes = .empty,
@@ -23,7 +25,7 @@ pub const DiagnosticBuilder = struct {
     pub fn warn(ctx: *CompilerContext, comptime fmt: []const u8, args: anytype) DiagnosticBuilder {
         return .{
             .ctx = ctx,
-            .severity = .Warning,
+            .severity = .warning,
             .message = std.fmt.allocPrint(ctx.allocator, fmt, args) catch "Failed to format diagnostic message",
             .labels = .empty,
             .notes = .empty,
@@ -33,7 +35,7 @@ pub const DiagnosticBuilder = struct {
     pub fn info(ctx: *CompilerContext, comptime fmt: []const u8, args: anytype) DiagnosticBuilder {
         return .{
             .ctx = ctx,
-            .severity = .Info,
+            .severity = .info,
             .message = std.fmt.allocPrint(ctx.allocator, fmt, args) catch "Failed to format diagnostic message",
             .labels = .empty,
             .notes = .empty,

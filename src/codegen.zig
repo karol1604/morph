@@ -4,9 +4,9 @@ const context = @import("context.zig");
 const Emitter = @import("emitters/emitter.zig").Emitter;
 const ir = @import("ir.zig");
 const liveness = @import("liveness.zig");
-const targ = @import("target.zig");
 const ra = @import("register_allocator.zig");
 const RegisterAllocator = ra.RegisterAllocator;
+const targ = @import("target.zig");
 
 pub const CodeGen = struct {
     ctx: *context.CompilerContext,
@@ -42,6 +42,7 @@ pub const CodeGen = struct {
 
             var regAlloc = try RegisterAllocator.init(liveIntervals, self.ctx.allocator);
 
+            // FIXME: does not work for more than 8 params in the arm64 calling convention, but we can fix that later
             for (func.params.items, 0..) |param, idx| {
                 const key = liveness.LivenessKey{ .Var = param.toString() };
                 const argReg = ra.ARGUMENT_REGISTERS[idx];
@@ -68,6 +69,33 @@ pub const CodeGen = struct {
                 }
             }
 
+            const callSites = self.findCallSites(func);
+
+            for (liveIntervals) |interval| {
+                // skip params, already pre-assigned
+                if (regAlloc.allocations.contains(interval.key)) continue;
+
+                for (callSites) |callPos| {
+                    if (interval.start <= callPos and callPos <= interval.end) {
+                        // find next available callee-saved register
+                        for (regAlloc.availableRegisters.items, 0..) |reg, i| {
+                            if (reg.kind == .CalleeSaved) {
+                                try regAlloc.allocations.put(interval.key, .{ .Reg = reg });
+                                _ = regAlloc.availableRegisters.orderedRemove(i);
+                                try regAlloc.insertSortedByEndIntoActive(interval);
+                                std.debug.print("******* pre-assigning {f} to callee-saved register {s} because of call at position {d}\n", .{
+                                    interval,
+                                    reg.name.toString(),
+                                    callPos,
+                                });
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
             try regAlloc.allocate();
             self.allocations = regAlloc.allocations;
             const frameSize = std.mem.alignForward(usize, regAlloc.spill * 8 + 16, 16);
@@ -81,18 +109,36 @@ pub const CodeGen = struct {
         }
     }
 
-    pub fn writeToFile(self: *CodeGen, path: []const u8) !void {
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
-        try file.writeAll(self.output.items);
-        // for (self.output.items) |byte| {
-        //     std.debug.print("{c}", .{byte});
-        // }
+    pub fn writeToFile(self: *CodeGen, path: []const u8, io: std.Io) !void {
+        const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+        defer file.close(io);
+        // trim trailing new lines for cleaner output
+        while (self.output.items.len > 0 and self.output.items[self.output.items.len - 1] == '\n') {
+            self.output.items = self.output.items[0 .. self.output.items.len - 1];
+        }
+        try file.writeStreamingAll(io, self.output.items);
+    }
+
+    fn findCallSites(self: *CodeGen, func: ir.IRFunction) []usize {
+        var callSites: std.ArrayList(usize) = .empty;
+        var pos: usize = 0;
+
+        for (func.blocks.items) |block| {
+            for (block.instructions.items) |instr| {
+                switch (instr) {
+                    .Call => callSites.append(self.ctx.allocator, pos) catch @panic("failed to append call site"),
+                    else => {},
+                }
+                pos += 1;
+            }
+        }
+        return callSites.toOwnedSlice(self.ctx.allocator) catch @panic("failed to create call sites slice");
     }
 
     fn emitFunction(self: *CodeGen, func: ir.IRFunction, frameSize: usize) !void {
         self.currentStackOffset = -8; // reset stack offset for each function
-        try self.emit("{s}:\n; param count: {d}\n", .{ func.name, func.params.items.len });
+        // try self.emit("{s}:   ; param count: {d}\n", .{ func.name, func.params.items.len });
+        try self.emit("{s}:\n", .{func.name});
 
         self.currentFrameSize = frameSize;
         try self.emitPrologue(self.currentFrameSize);
@@ -166,7 +212,9 @@ pub const CodeGen = struct {
                     }),
                     else => {
                         const src = self.resolveRegister(op.value);
-                        try self.emit("    mov {s}, {s}\n", .{ dst, src });
+                        if (!std.mem.eql(u8, dst, src)) {
+                            try self.emit("    mov {s}, {s}\n", .{ dst, src });
+                        }
                     },
                 }
             },
@@ -247,9 +295,8 @@ pub const CodeGen = struct {
             .Call => |op| {
                 try self.emit("    ; call {s}({d} args)[{f}]\n", .{ op.callee, op.args.len, op.result });
                 for (op.args, 0..) |arg, idx| {
-                    try self.emit("    ; arg {d}: {f}\n", .{ idx, arg });
                     const reg = std.fmt.allocPrint(self.ctx.allocator, "x{d}", .{idx}) catch unreachable;
-                    try self.loadOperand(arg, reg);
+                    try self.loadOperand(arg, reg, "arg {d}: {f}", .{ idx, arg });
                 }
                 try self.emit("    bl {s}\n", .{op.callee});
                 try self.storeVariable(op.result, "x0");
@@ -273,8 +320,8 @@ pub const CodeGen = struct {
         cmpInstr: []const u8,
     ) !void {
         try self.emit("    ; {f} = {f} {s} {f}\n", .{ result, left, cmpInstr, right });
-        try self.loadOperand(left, "x0");
-        try self.loadOperand(right, "x1");
+        try self.loadOperand(left, "x0", null, .{});
+        try self.loadOperand(right, "x1", null, .{});
         try self.emit("    cmp x0, x1\n", .{});
         try self.emit("    cset x0, {s}\n", .{cmpInstr});
         try self.storeVariable(result, "x0");
@@ -290,17 +337,33 @@ pub const CodeGen = struct {
         return self.allocations.?.get(key) orelse @panic("No allocation found for operand");
     }
 
-    fn loadOperand(self: *CodeGen, operand: ir.Operand, destReg: []const u8) !void {
+    fn loadOperand(
+        self: *CodeGen,
+        operand: ir.Operand,
+        destReg: []const u8,
+        comptime commentFmt: ?[]const u8,
+        commentArgs: anytype,
+    ) !void {
         switch (operand.value) {
-            .Int => |i| try self.emit("    mov {s}, #{d}\n", .{ destReg, i }),
-            .Bool => |b| try self.emit("    mov {s}, #{d}\n", .{ destReg, @intFromBool(b) }),
+            .Int => |i| {
+                try self.emit("    mov {s}, #{d}", .{ destReg, i });
+                if (commentFmt) |fmt| try self.emit(" ; " ++ fmt, commentArgs);
+                try self.emit("\n", .{});
+            },
+            .Bool => |b| {
+                try self.emit("    mov {s}, #{d}", .{ destReg, @intFromBool(b) });
+                if (commentFmt) |fmt| try self.emit(" ; " ++ fmt, commentArgs);
+                try self.emit("\n", .{});
+            },
             .Variable, .Temp => {
                 // const offset = self.varToStackOffset.get(name) orelse unreachable;
                 // try self.emit("    ldr {s}, [x29, #{d}] ; load {s}\n", .{ reg, offset, name });
                 switch (self.resolveOperand(operand)) {
                     .Reg => |reg| {
                         if (!std.mem.eql(u8, reg.name.toString(), destReg)) {
-                            try self.emit("    mov {s}, {s}\n", .{ destReg, reg.name.toString() });
+                            try self.emit("    mov {s}, {s}", .{ destReg, reg.name.toString() });
+                            if (commentFmt) |fmt| try self.emit(" ; " ++ fmt, commentArgs);
+                            try self.emit("\n", .{});
                         }
                     },
                     .Spill => |slot| {
@@ -327,20 +390,20 @@ pub const CodeGen = struct {
                 try self.emit("\n    ; exit {f}\n", .{op});
                 switch (op.value) {
                     .Int => |code| try self.emit("    mov x0, #{d}\n", .{code}),
-                    .Variable, .Temp => try self.loadOperand(op, "x0"),
+                    .Variable, .Temp => try self.loadOperand(op, "x0", null, .{}),
                     else => @panic("unsupported exit operand"),
                 }
                 try self.emit("    mov x16, #1\n    svc #0x80\n", .{});
             },
             .Return => |op| {
-                try self.emit("    ; return {f}\n", .{op});
-                try self.loadOperand(op, "x0");
+                // try self.emit("    ; return {f}\n", .{op});
+                try self.loadOperand(op, "x0", "return {f}", .{op});
                 try self.emitEpilogue(self.currentFrameSize);
                 try self.emit("    ret\n", .{});
             },
             .Jump => |target| try self.emit("    b block_{s}_{d}\n", .{ funcName, target }),
             .ConditionalJump => |cj| {
-                try self.loadOperand(cj.condition, "x0");
+                try self.loadOperand(cj.condition, "x0", null, .{});
                 try self.emit("    cmp x0, #1\n", .{});
                 try self.emit("    b.eq block_{s}_{d}\n", .{ funcName, cj.trueTarget });
                 try self.emit("    b block_{s}_{d}\n", .{ funcName, cj.falseTarget });
@@ -350,13 +413,13 @@ pub const CodeGen = struct {
     }
 
     fn emit(self: *CodeGen, comptime fmt: []const u8, args: anytype) !void {
-        try self.output.writer(self.ctx.allocator).print(fmt, args);
+        try self.output.print(self.ctx.allocator, fmt, args);
         std.debug.print(fmt, args); // for debugging
     }
 
     fn emitPrologue(self: *CodeGen, frameSize: usize) !void {
-        try self.emit("    ; prologue\n", .{});
-        try self.emit("    ; frame size: {}\n", .{frameSize});
+        // try self.emit("    ; prologue\n", .{});
+        try self.emit("    ; frame size: {d}\n", .{frameSize});
         try self.emit("    sub sp, sp, #{d}\n", .{frameSize});
 
         try self.emit("    stp x29, x30, [sp, #{d}]\n", .{frameSize - 16});
@@ -373,20 +436,6 @@ pub const CodeGen = struct {
     fn emitHeader(self: *CodeGen) !void {
         try self.emit(".global _main\n", .{}); // NOTE: hardcoded
         try self.emit(".align 2\n\n", .{});
-    }
-
-    fn calculateFrameSize(func: ir.IRFunction) usize {
-        var count: usize = func.params.items.len;
-        for (func.blocks.items) |block| {
-            for (block.instructions.items) |instr| {
-                switch (instr) {
-                    // TODO: dont forget about the rest
-                    .Assign, .Add, .Sub, .Mul, .Div, .Call, .Eq, .Neq, .Lt, .LtEq, .Gt, .GtEq, .UnaryMinus => count += 1,
-                }
-            }
-        }
-        const bytes = count * 8;
-        return std.mem.alignForward(usize, bytes + 16, 16); // NOTE: we need the +16 for x29 x30
     }
 
     fn storeVariable(self: *CodeGen, result: ir.Operand, srcReg: []const u8) !void {
