@@ -92,14 +92,21 @@ pub const Parser = struct {
 
         switch (self.peekToken().kind) {
             .Colon => return try self.parseFunctionTypeSignature(),
-            .LParen => {
+            .DoubleRightArrow => return try self.parseFunctionDefinition(),
+            .Identifier => {
                 if (self.isFunctionDefinition()) {
-                    std.debug.print("Parsing function definition...\n", .{});
                     return try self.parseFunctionDefinition();
-                    // return error.FunctionDefNotSupported;
                 }
-                return try self.parseExpression(.Lowest); // function call
+                return try self.parseExpression(.Lowest);
             },
+            // .LParen => {
+            //     if (self.isFunctionDefinition()) {
+            //         std.debug.print("Parsing function definition...\n", .{});
+            //         return try self.parseFunctionDefinition();
+            //         // return error.FunctionDefNotSupported;
+            //     }
+            //     return try self.parseExpression(.Lowest); // function call
+            // },
             else => return try self.parseExpression(.Lowest),
         }
     }
@@ -113,28 +120,23 @@ pub const Parser = struct {
 
     fn parseFunctionDefinition(self: *Parser) !*Expr {
         const name = try self.parseIdentifier(); // consumes the name
-        _ = try self.expect(.LParen);
-        self.skipNewlines(); // allow newlines immediately after `(`
 
         var params: std.ArrayList([]const u8) = .empty;
 
-        while (self.currentToken().kind != .RParen) {
+        while (self.currentToken().kind != .DoubleRightArrow) {
             const param = try self.parseIdentifier();
             if (std.meta.activeTag(param.kind) != .Identifier) {
                 return error.ExpectedIdentifier;
             }
             try params.append(self.ctx.allocator, param.kind.Identifier);
-            self.skipNewlines(); // allow newlines between parameters
 
-            if (self.currentToken().kind == .Comma) {
-                self.advance(); // consume comma
-                self.skipNewlines(); // allow newlines after comma
-            } else {
-                break;
-            }
+            // if (self.currentToken().kind == .Comma) {
+            //     self.advance(); // consume comma
+            // } else {
+            //     break;
+            // }
         }
 
-        _ = try self.expect(.RParen);
         _ = try self.expect(.DoubleRightArrow);
 
         const body = try self.parseExpression(.Lowest);
@@ -153,27 +155,40 @@ pub const Parser = struct {
         });
     }
 
+    // fn isFunctionDefinition(self: *const Parser) bool {
+    //     var offset: usize = 1;
+    //
+    //     if (self.current + offset >= self.tokens.len) return false;
+    //     if (self.tokens[self.current + offset].kind != .LParen) return false;
+    //
+    //     offset += 1;
+    //     var openParens: usize = 1;
+    //     while (self.current + offset < self.tokens.len and openParens > 0) : (offset += 1) {
+    //         const tok = self.tokens[self.current + offset];
+    //         if (tok.kind == .LParen) {
+    //             openParens += 1;
+    //         } else if (tok.kind == .RParen) {
+    //             openParens -= 1;
+    //         }
+    //     }
+    //
+    //     if (self.current + offset < self.tokens.len) {
+    //         return self.tokens[self.current + offset].kind == .DoubleRightArrow;
+    //     }
+    //
+    //     return false;
+    // }
+
     fn isFunctionDefinition(self: *const Parser) bool {
-        var offset: usize = 1;
-
-        if (self.current + offset >= self.tokens.len) return false;
-        if (self.tokens[self.current + offset].kind != .LParen) return false;
-
-        offset += 1;
-        var openParens: usize = 1;
-        while (self.current + offset < self.tokens.len and openParens > 0) : (offset += 1) {
+        var offset: usize = 1; // skip the function name
+        while (self.current + offset < self.tokens.len) {
             const tok = self.tokens[self.current + offset];
-            if (tok.kind == .LParen) {
-                openParens += 1;
-            } else if (tok.kind == .RParen) {
-                openParens -= 1;
+            switch (tok.kind) {
+                .Identifier => offset += 1,
+                .DoubleRightArrow => return true,
+                else => return false,
             }
         }
-
-        if (self.current + offset < self.tokens.len) {
-            return self.tokens[self.current + offset].kind == .DoubleRightArrow;
-        }
-
         return false;
     }
 
