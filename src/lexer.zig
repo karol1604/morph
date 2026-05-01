@@ -48,7 +48,7 @@ pub const Lexer = struct {
         } else {
             self.col += 1;
         }
-        return c; //_ orelse 0;
+        return c; //orelse 0;
     }
 
     fn peek(self: *const Lexer) u21 {
@@ -183,8 +183,21 @@ pub const Lexer = struct {
 
         while (!self.isAtEnd()) {
             const c = self.peek();
-            if (c == ' ' or c == '\t' or c == '\r' or c == '\n') {
+            if (c == ' ' or c == '\t' or c == '\r') {
                 _ = try self.advance();
+                continue;
+            }
+
+            if (c == '\n') {
+                const startLoc = self.currentLocation();
+                _ = try self.advance();
+                try toks.append(
+                    self.ctx.allocator,
+                    .{
+                        .kind = .Newline,
+                        .span = Span{ .start = startLoc, .end = self.currentLocation() },
+                    },
+                );
                 continue;
             }
 

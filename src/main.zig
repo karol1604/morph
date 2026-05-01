@@ -19,65 +19,6 @@ fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
     }
 }
 
-fn printSnippet(source: []const u8, span: Span, context_lines: usize) void {
-    var line_start = span.start.offset;
-    while (line_start > 0 and source[line_start - 1] != '\n') : (line_start -= 1) {}
-
-    var line_end = span.start.offset;
-    while (line_end < source.len and source[line_end] != '\n') : (line_end += 1) {}
-
-    var ctx_start = line_start;
-    var lines_found: usize = 0;
-    while (lines_found < context_lines and ctx_start > 0) {
-        ctx_start -= 1;
-        if (source[ctx_start] == '\n') {
-            lines_found += 1;
-        }
-    }
-    if (source[ctx_start] == '\n') ctx_start += 1;
-
-    if (ctx_start < line_start) {
-        var it = std.mem.splitScalar(u8, source[ctx_start..line_start], '\n');
-        while (it.next()) |ctx_line| {
-            if (ctx_line.len > 0) std.debug.print("    {s}\n", .{ctx_line});
-        }
-    }
-
-    const error_line = source[line_start..line_end];
-    std.debug.print("    {s}\n", .{error_line});
-
-    const underline_len = @max(1, span.end.col - span.start.col);
-    std.debug.print("    ", .{});
-
-    const padding = span.start.offset - line_start;
-
-    var i: usize = 0;
-    while (i < padding) : (i += 1) {
-        std.debug.print(" ", .{});
-    }
-    i = 0;
-    while (i < underline_len) : (i += 1) {
-        std.debug.print("^", .{});
-    }
-    std.debug.print("\n", .{});
-
-    var ctx_idx = line_end;
-    if (ctx_idx < source.len) ctx_idx += 1; // Skip the newline of the error line itself
-
-    lines_found = 0;
-    while (lines_found < context_lines and ctx_idx < source.len) {
-        // Find end of this specific context line
-        var current_ctx_end = ctx_idx;
-        while (current_ctx_end < source.len and source[current_ctx_end] != '\n') : (current_ctx_end += 1) {}
-
-        const ctx_line = source[ctx_idx..current_ctx_end];
-        std.debug.print("    {s}\n", .{ctx_line});
-
-        ctx_idx = current_ctx_end + 1; // Move past the newline
-        lines_found += 1;
-    }
-}
-
 pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     // const source = "ℕ";

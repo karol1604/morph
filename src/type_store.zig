@@ -143,5 +143,6 @@ pub const Symbol = struct {
         Function,
     },
     span: Span,
+    domainSpan: ?Span, // Only used for functions to indicate the parameter type annotation span
     codomainSpan: ?Span, // Only used for functions to indicate the return type annotation span
 };

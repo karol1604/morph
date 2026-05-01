@@ -37,27 +37,59 @@ pub const Parser = struct {
 
     pub fn parse(self: *Parser) ![]*Expr {
         var res: std.ArrayList(*Expr) = .empty;
+        _ = self.consumeSeparators(); // skip leading separators
 
         while (self.currentToken().kind != .Eof) {
-            // const expr = try self.parseExpression(.Lowest);
             const expr = try self.parseTopLevelExpression();
             try res.append(self.ctx.allocator, expr);
 
-            if (self.currentToken().kind == .Semicolon) {
-                self.advance(); // Eat the ';'
-            } else if (self.currentToken().kind != .Eof) {
-                std.debug.print("Expected semicolon between expressions, found {f}\n", .{self.currentToken().kind});
-                return error.ExpectedSemicolon;
+            if (self.currentToken().kind == .Eof) {
+                break;
             }
+
+            if (!self.consumeSeparators()) {
+                std.debug.print(
+                    "Expected expression separator, found {f}\n",
+                    .{self.currentToken().kind},
+                );
+                return error.ExpectedExpressionSeparator;
+            }
+
+            _ = self.consumeSeparators();
         }
 
         return try res.toOwnedSlice(self.ctx.allocator);
     }
 
+    fn skipNewlines(self: *Parser) void {
+        while (self.currentToken().kind == .Newline) {
+            self.advance();
+        }
+    }
+
+    fn consumeSeparators(self: *Parser) bool {
+        var consumed = false;
+
+        while (true) {
+            switch (self.currentToken().kind) {
+                .Newline, .Semicolon => {
+                    consumed = true;
+                    self.advance();
+                },
+                else => return consumed,
+            }
+        }
+    }
+
     fn parseTopLevelExpression(self: *Parser) !*Expr {
+        if (self.currentToken().kind == .KwLet) {
+            return try self.parseVariableDecl();
+        }
+
         if (self.currentToken().kind != .Identifier) {
             return try self.parseExpression(.Lowest);
         }
+
         switch (self.peekToken().kind) {
             .Colon => return try self.parseFunctionTypeSignature(),
             .LParen => {
@@ -72,9 +104,17 @@ pub const Parser = struct {
         }
     }
 
+    fn parseDeclOrExpr(self: *Parser) anyerror!*Expr {
+        if (self.currentToken().kind == .KwLet) {
+            return try self.parseVariableDecl();
+        }
+        return try self.parseExpression(.Lowest);
+    }
+
     fn parseFunctionDefinition(self: *Parser) !*Expr {
         const name = try self.parseIdentifier(); // consumes the name
         _ = try self.expect(.LParen);
+        self.skipNewlines(); // allow newlines immediately after `(`
 
         var params: std.ArrayList([]const u8) = .empty;
 
@@ -84,9 +124,11 @@ pub const Parser = struct {
                 return error.ExpectedIdentifier;
             }
             try params.append(self.ctx.allocator, param.kind.Identifier);
+            self.skipNewlines(); // allow newlines between parameters
 
             if (self.currentToken().kind == .Comma) {
                 self.advance(); // consume comma
+                self.skipNewlines(); // allow newlines after comma
             } else {
                 break;
             }
@@ -141,12 +183,16 @@ pub const Parser = struct {
             .IntLiteral => try self.parseIntLiteral(),
             .Identifier => try self.parseIdentifierOrFunctionCall(),
             .KwTrue, .KwFalse => try self.parseBoolLiteral(),
-            .KwLet => try self.parseVariableDecl(),
+            // .KwLet => try self.parseVariableDecl(),
             .KwIf => try self.parseIfExpression(),
             .Plus, .Minus, .Bang => try self.parseUnaryExpression(),
             .LParen => try self.parseGroupExpression(),
             .LBrace => try self.parseBlockExpression(),
             else => {
+                if (self.currentToken().kind == .KwLet) {
+                    std.debug.print("`let` is not valid as a sub-expression\n", .{});
+                    return error.LetInValuePosition;
+                }
                 std.debug.print("Invalid token: `{f}`\n", .{self.currentToken().kind});
                 return error.UnsupportedToken;
             },
@@ -168,15 +214,21 @@ pub const Parser = struct {
     fn parseIfExpression(self: *Parser) anyerror!*Expr {
         const startSpan = self.currentToken().span;
         self.advance(); // consume `if`
+        self.skipNewlines(); // allow newlines after `if`
 
-        if (1 == 1) std.debug.print("Parsing if expression...\n", .{}) else return error.Unreachable; // sanity check to ensure this function is only called when the current token is `if`
+        std.debug.print("Parsing if expression...\n", .{});
 
         const condition = try self.parseExpression(.Lowest);
+        self.skipNewlines(); // allow newlines before `then`
+        _ = try self.expect(.KwThen);
+        self.skipNewlines(); // allow newlines after `then`
         const thenBranch = try self.parseExpression(.Lowest);
 
         var elseBranch: ?*Expr = null;
+        self.skipNewlines(); // allow newlines before `else`
         if (self.currentToken().kind == .KwElse) {
             self.advance(); // consume `else`
+            self.skipNewlines(); // allow newlines after `else`
             elseBranch = try self.parseExpression(.Lowest);
         }
 
@@ -267,12 +319,14 @@ pub const Parser = struct {
         self.advance(); // consume the left paren
 
         if (self.currentToken().kind == .RParen) {
+            const endSpan = self.currentToken().span;
             self.advance(); // consume the right paren
             return self.heapAlloc(Expr, .{
                 .kind = .{ .Identifier = "Unit" },
-                .span = Span.join(startSpan, self.currentToken().span),
+                .span = Span.join(startSpan, endSpan),
             });
         }
+
         const expr = try self.parseTypeExpression(.Lowest);
         if (self.currentToken().kind != .RParen) {
             return error.UnclosedLParen;
@@ -281,7 +335,12 @@ pub const Parser = struct {
         return expr;
     }
 
-    fn parseBinaryExpression(self: *Parser, lhs: *const Expr, op: BinaryOperator, prec: Precedence) !*Expr {
+    fn parseBinaryExpression(
+        self: *Parser,
+        lhs: *const Expr,
+        op: BinaryOperator,
+        prec: Precedence,
+    ) !*Expr {
         self.advance(); // Consume the operator
 
         // NOTE: is this a hack? idk...
@@ -300,45 +359,71 @@ pub const Parser = struct {
     }
 
     fn parseBlockExpression(self: *Parser) !*Expr {
-        // exprs followed by `;` have their values discarded
-        // the last expression without ';' becomes the block's value (tail)
         // empty blocks evaluate to unit
         const startSpan = self.currentToken().span;
         self.advance(); // consume the left brace
+        _ = self.consumeSeparators(); // allow separators immediately after `{`
 
-        var statements: std.ArrayList(*Expr) = .empty;
-        var tail: ?*Expr = null;
+        var exprs: std.ArrayList(*Expr) = .empty;
 
         while (self.currentToken().kind != .RBrace and self.currentToken().kind != .Eof) {
             // Parse the expression
-            const expr = try self.parseExpression(.Lowest);
+            const expr = try self.parseDeclOrExpr();
+            try exprs.append(self.ctx.allocator, expr);
 
-            if (self.currentToken().kind == .Semicolon) {
-                // Case 1: expr; -> value is discarded
-                self.advance(); // eat semicolon
-                try statements.append(self.ctx.allocator, expr);
-            } else {
-                // Case 2: expr -> potentially the tail
-                tail = expr;
-                // If we don't see a '}', it's a syntax error (missing semicolon)
-                if (self.currentToken().kind != .RBrace) {
-                    return error.ExpectedSemicolon;
-                }
+            if (self.currentToken().kind == .RBrace) {
+                break; // end of block, no more expressions
             }
+
+            if (!self.consumeSeparators()) {
+                std.debug.print(
+                    "Expected expression separator or end of block, found {f}\n",
+                    .{self.currentToken().kind},
+                );
+                return error.ExpectedExpressionSeparatorOrRBrace;
+            }
+
+            _ = self.consumeSeparators(); // allow multiple separators between expressions
+
         }
 
         const endSpan = self.currentToken().span;
         _ = try self.expect(.RBrace);
 
+        const owned_exprs = try exprs.toOwnedSlice(self.ctx.allocator);
+
+        var stmts: []const *Expr = owned_exprs;
+        var tail: ?*Expr = null;
+
+        if (owned_exprs.len > 0) {
+            stmts = owned_exprs[0 .. owned_exprs.len - 1];
+            tail = owned_exprs[owned_exprs.len - 1];
+        }
+
         return self.heapAlloc(Expr, .{
-            .kind = .{ .Block = .{ .stmts = try statements.toOwnedSlice(self.ctx.allocator), .tail = tail } },
+            .kind = .{ .Block = .{ .stmts = stmts, .tail = tail } },
             .span = Span.join(startSpan, endSpan),
         });
     }
 
     fn parseGroupExpression(self: *Parser) !*Expr {
+        const startSpan = self.currentToken().span;
         self.advance(); // consume the left paren
+        self.skipNewlines(); // allow newlines immediately after `(`
+
+        if (self.currentToken().kind == .RParen) {
+            const endSpan = self.currentToken().span;
+            self.advance(); // consume `)`
+
+            return self.heapAlloc(Expr, .{
+                .kind = .UnitLiteral,
+                .span = Span.join(startSpan, endSpan),
+            });
+        }
+
         const expr = try self.parseExpression(.Lowest);
+
+        self.skipNewlines(); // allow newlines before `)`
         if (self.currentToken().kind != .RParen) {
             return error.UnclosedLParen;
         }
@@ -430,6 +515,7 @@ pub const Parser = struct {
 
     fn parseFunctionCall(self: *Parser, callee: []const u8, start_span: Span) !*Expr {
         self.advance(); // consume the left paren
+        self.skipNewlines(); // allow newlines immediately after `(`
 
         var args: std.ArrayList(*const Expr) = .empty;
 
@@ -437,8 +523,11 @@ pub const Parser = struct {
             const arg = try self.parseExpression(.Lowest);
             try args.append(self.ctx.allocator, arg);
 
+            self.skipNewlines(); // allow newlines between arguments
+
             if (self.currentToken().kind == .Comma) {
                 self.advance(); // consume comma
+                self.skipNewlines(); // allow newlines after comma
             } else {
                 break;
             }
@@ -501,7 +590,7 @@ pub const Parser = struct {
         };
     }
 
-    fn currentToken(self: *Parser) Token {
+    fn currentToken(self: *const Parser) Token {
         return self.tokens[self.current];
     }
 
@@ -511,7 +600,7 @@ pub const Parser = struct {
         }
     }
 
-    fn peekToken(self: *Parser) Token {
+    fn peekToken(self: *const Parser) Token {
         if (self.current + 1 >= self.tokens.len) {
             return self.tokens[self.tokens.len - 1];
         }
@@ -537,7 +626,7 @@ pub const Parser = struct {
         };
     }
 
-    fn getTokenPrec(_: *Parser, tokenType: TokenType) Precedence {
+    fn getTokenPrec(_: *const Parser, tokenType: TokenType) Precedence {
         return switch (tokenType) {
             .KwAnd, .KwOr => .Logical,
 

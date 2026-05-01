@@ -10,6 +10,7 @@ pub const ExprKind = union(enum) {
     IntLiteral: i64,
     Identifier: []const u8,
     BoolLiteral: bool,
+    UnitLiteral,
 
     Unary: struct {
         operator: UnaryOperator,

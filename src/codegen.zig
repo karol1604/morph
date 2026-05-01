@@ -184,7 +184,7 @@ pub const CodeGen = struct {
         const key: liveness.LivenessKey = switch (op.value) {
             .Temp => |id| .{ .Temp = id },
             .Variable => |name| .{ .Var = name },
-            else => @panic("unsupported operand type for register resolution"),
+            else => std.debug.panic("unsupported operand type for register resolution {f}", .{op}),
         };
         const alloc = self.allocations.?.get(key) orelse @panic("no allocation for operand");
         return switch (alloc) {
@@ -368,7 +368,10 @@ pub const CodeGen = struct {
                     },
                     .Spill => |slot| {
                         const offset = CodeGen.spillSlotOffset(slot);
-                        try self.emit("    ldr {s}, [x29, #-{d}] ; load spilled value\n", .{ destReg, offset });
+                        try self.emit("    ldr {s}, [x29, #-{d}] ; load spilled value\n", .{
+                            destReg,
+                            offset,
+                        });
                     },
                 }
             },

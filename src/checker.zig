@@ -107,8 +107,24 @@ pub const Checker = struct {
 
     fn checkExpr(self: *Checker, expr: *const ast.Expr, typeExp: ?TypeExpectation) anyerror!*CheckedExpr {
         switch (expr.*.kind) {
-            .IntLiteral => |int| return try self.typedExpr(.{ .IntLiteral = int }, INT_TYPE_ID, typeExp, expr.span),
-            .BoolLiteral => |b| return try self.typedExpr(.{ .BoolLiteral = b }, BOOL_TYPE_ID, typeExp, expr.span),
+            .IntLiteral => |int| return try self.typedExpr(
+                .{ .IntLiteral = int },
+                INT_TYPE_ID,
+                typeExp,
+                expr.span,
+            ),
+            .BoolLiteral => |b| return try self.typedExpr(
+                .{ .BoolLiteral = b },
+                BOOL_TYPE_ID,
+                typeExp,
+                expr.span,
+            ),
+            .UnitLiteral => return try self.typedExpr(
+                .{ .UnitLiteral = {} },
+                UNIT_TYPE_ID,
+                typeExp,
+                expr.span,
+            ),
             .Unary => return try self.checkUnaryExpr(expr, typeExp),
             .Binary => return try self.checkBinaryExpr(expr, typeExp),
             .VariableDecl => return try self.checkVariableDecl(expr),
@@ -294,14 +310,34 @@ pub const Checker = struct {
         const funcDef = expr.kind.FunctionDef;
         const funcSig = self.currentScope().lookupSymbol(funcDef.name);
 
+        if (funcSig) |sym| {
+            if (sym.kind != .Function) {
+                var d = DiagnosticBuilder.err(self.ctx, "symbol `{s}` already declared and is not a function", .{funcDef.name});
+                _ = d.primaryLabel(expr.span, "function definition found here", .{})
+                    .note(
+                    "`{s}` is of type `{s}`",
+                    .{ funcDef.name, self.typeStore.formatTypeName(sym.typeId) },
+                );
+                d.emit();
+                return try self.typedExpr(
+                    .{
+                        .FunctionDecl = .{
+                            .name = funcDef.name,
+                            .body = undefined,
+                            .params = undefined,
+                            .id = sym.id,
+                        },
+                    },
+                    ERROR_TYPE_ID,
+                    null,
+                    expr.span,
+                );
+            }
+        }
+
         var checkedParams: std.ArrayList(cheked_ast.Param) = .empty;
 
         if (funcSig == null) {
-            // self.ctx.reportError(
-            //     expr.span,
-            //     "function `{s}` has no type signature",
-            //     .{funcDef.name},
-            // );
             var d = DiagnosticBuilder.err(self.ctx, "function `{s}` has no type signature", .{funcDef.name});
             _ = d.primaryLabel(expr.span, "definition found here", .{});
             _ = d.note("add a signature like `{s} : <params> -> <return type>`", .{funcDef.name});
@@ -325,6 +361,29 @@ pub const Checker = struct {
         const codomainId = self.typeStore.types.items[funcSig.?.typeId].Function.codomain;
 
         const params = try self.collectParamTypes(domainId);
+        if (funcDef.params.len != params.len) {
+            var d = DiagnosticBuilder.err(
+                self.ctx,
+                "function `{s}` type signature declares {d} parameters, but definition has {d}",
+                .{ funcDef.name, params.len, funcDef.params.len },
+            );
+            _ = d.primaryLabel(expr.span, "but found {d} here", .{funcDef.params.len})
+                .secondaryLabel(funcSig.?.domainSpan.?, "expected {d} params here", .{params.len})
+                .emit();
+
+            return try self.typedExpr(
+                .{ .FunctionDecl = .{
+                    .name = funcDef.name,
+                    .body = undefined,
+                    .params = undefined,
+                    .id = funcSig.?.id,
+                } },
+                ERROR_TYPE_ID,
+                null,
+                expr.span,
+            );
+        }
+
         std.debug.print("Collected param types: ", .{});
         for (params) |pid| {
             std.debug.print("{s} ", .{self.typeStore.formatTypeName(pid)});
@@ -349,6 +408,7 @@ pub const Checker = struct {
                 .kind = .Variable,
                 .id = id,
                 .span = expr.span, // FIXME: add spans to params
+                .domainSpan = null,
                 .codomainSpan = null,
             };
             try self.currentScope().defineSymbol(paramSym);
@@ -424,10 +484,24 @@ pub const Checker = struct {
             .kind = .Function,
             .id = id,
             .span = expr.span,
+            .domainSpan = funcSig.domain.span,
             .codomainSpan = funcSig.codomain.span,
         };
 
-        try self.currentScope().defineSymbol(funcSym);
+        self.currentScope().defineSymbol(funcSym) catch |err| switch (err) {
+            error.SymbolAlreadyDefined => {
+                const previous = self.currentScope().lookupSymbol(funcSig.name).?;
+                var d = DiagnosticBuilder.err(
+                    self.ctx,
+                    "function `{s}` already declared in this scope",
+                    .{funcSig.name},
+                );
+                _ = d.primaryLabel(expr.span, "redeclared here", .{});
+                _ = d.secondaryLabel(previous.span, "first declared here", .{});
+                d.emit();
+            },
+            else => return err,
+        };
 
         return try self.typedExpr(
             .{
@@ -646,6 +720,7 @@ pub const Checker = struct {
             .kind = .Variable,
             .id = id,
             .span = span,
+            .domainSpan = null,
             .codomainSpan = null,
         };
 

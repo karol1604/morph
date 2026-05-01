@@ -62,6 +62,9 @@ fn prettyPrintRec(
         .BoolLiteral => |val| {
             std.debug.print("BoolLiteral {s}\n", .{if (val) "true" else "false"});
         },
+        .UnitLiteral => {
+            std.debug.print("UnitLiteral\n", .{});
+        },
         .Unary => |u| {
             const opStr = switch (u.operator) {
                 .Plus => "+",
@@ -214,6 +217,9 @@ fn prettyPrintRecCheck(
         },
         .BoolLiteral => |val| {
             std.debug.print("BoolLiteral {s} (typeId: {d})\n", .{ if (val) "true" else "false", expr.typeId });
+        },
+        .UnitLiteral => {
+            std.debug.print("UnitLiteral (typeId: {d})\n", .{expr.typeId});
         },
         .Unary => |u| {
             const opStr = switch (u.operator) {

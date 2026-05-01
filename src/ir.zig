@@ -376,6 +376,9 @@ pub const IRGen = struct {
                     .type = v.type,
                 };
             },
+            .UnitLiteral => {
+                return Operand{ .value = .Unit, .type = .Unit };
+            },
             .Unary => |un| {
                 const rightOp = try self.genExpr(un.right);
 

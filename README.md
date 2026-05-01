@@ -31,3 +31,20 @@ classify(n) = {
 - Stronger type inference (Hindley-Milner or something similar)
 - Algebraic data types and strong pattern matching
 - Lazy evaluation and infinite data structures
+
+## Some issues
+There are a _lot_ of them lol
+- if an `if` expression has an else branch, both branches don't have to be blocks but if there is no else branch, we assume it's a block
+- in the IR, we use strings for names instead of just id's
+- the error type is just a `Named` type which is bad
+- associativity issue in the type collecting phase for function definitions
+- unsupported operations are typechecked as valid but not implemented in the IR
+- function-local variables are not scoped in IRGen
+- global captures are not handled
+- IR uses `OperandType` but we already have the `TypeId` from the checker, we should just use that instead
+- the register allocator/codegen combo is quite shaky currently
+- stack spills are not handled at all
+- no function hoisting
+- function type signatures do not check the params and return types correctly. we just use dummy `DOMAIN` and `CODOMAIN` identifiers instead of the actual types
+- there is like no tests at all. gotta add snapshot testing for everything
+- and probably a lot more that i don't know about yet lol...

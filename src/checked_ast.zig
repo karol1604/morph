@@ -18,6 +18,7 @@ pub const Param = struct {
 pub const CheckedExprKind = union(enum) {
     IntLiteral: i64,
     BoolLiteral: bool,
+    UnitLiteral,
     Identifier: struct {
         name: []const u8,
         id: usize, // unique id for this variable

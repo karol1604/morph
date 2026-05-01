@@ -1,10 +1,10 @@
-add: Int × Int -> Int;
-add(x, y) => x + y;
+x: Int × Int -> Int
+x(a, b) => a + b
 
-let a ∈ Bool = 10;
-let b = 2;
-let z = 4;
-let w = if (a > b) { z + 1 } else { z != 1 };
-let c = if (a > b) { a + add(a, true) } else { b + add(b, false) };
-
-c
+let b = 10
+let a = {
+    let a = b + 1 + x(b, 1)
+    a + 1
+}
+let z = x(a, b) + 1
+if z + 1 > 100 then 67 else 12

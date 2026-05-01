@@ -15,6 +15,7 @@ pub const TokenType = union(enum) {
     KwAnd,
     KwOr,
     KwIf,
+    KwThen,
     KwElse,
 
     RightArrow,
@@ -22,6 +23,7 @@ pub const TokenType = union(enum) {
     In, // ∈
     Cross, // ×
 
+    Newline,
     Semicolon,
     Comma,
     Colon,
@@ -61,6 +63,7 @@ pub const TokenType = union(enum) {
             .KwAnd => try writer.print("and", .{}),
             .KwOr => try writer.print("or", .{}),
             .KwIf => try writer.print("if", .{}),
+            .KwThen => try writer.print("then", .{}),
             .KwElse => try writer.print("else", .{}),
 
             .RightArrow => try writer.print("->", .{}),
@@ -68,6 +71,7 @@ pub const TokenType = union(enum) {
             .In => try writer.print("∈", .{}),
             .Cross => try writer.print("×", .{}),
 
+            .Newline => try writer.print("\\n", .{}),
             .Semicolon => try writer.print(";", .{}),
             .Comma => try writer.print(",", .{}),
             .Colon => try writer.print(":", .{}),
@@ -121,8 +125,10 @@ pub const Token = struct {
             .KwAnd => try writer.print("KW_AND", .{}),
             .KwOr => try writer.print("KW_OR", .{}),
             .KwIf => try writer.print("KW_IF", .{}),
+            .KwThen => try writer.print("KW_THEN", .{}),
             .KwElse => try writer.print("KW_ELSE", .{}),
 
+            .Newline => try writer.print("TOK_NEWLINE", .{}),
             .Semicolon => try writer.print("TOK_SEMICOLON", .{}),
             .Comma => try writer.print("TOK_COMMA", .{}),
             .Colon => try writer.print("TOK_COLON", .{}),
@@ -162,5 +168,6 @@ pub const Keywords = std.StaticStringMap(TokenType).initComptime(.{
     .{ "and", .KwAnd },
     .{ "or", .KwOr },
     .{ "if", .KwIf },
+    .{ "then", .KwThen },
     .{ "else", .KwElse },
 });
