@@ -30,6 +30,52 @@ pub fn prettyPrintExpression(expr: ast.Expr) void {
     prettyPrintRec(expr.kind, 0, &treeLines, true);
 }
 
+fn prettyPrintRecType(
+    expr: ast.TypeExprKind,
+    depth: usize,
+    treeLines: *[MAX_DEPTH]bool,
+    isLast: bool,
+) void {
+    if (depth > 0) {
+        // we only loop up to depth-1, because the last indent
+        // slot is for the branch itself
+        for (0..depth) |i| {
+            if (treeLines[i]) {
+                std.debug.print("│   ", .{});
+            } else {
+                std.debug.print("    ", .{});
+            }
+        }
+        // 2) Print the branch
+        if (isLast) std.debug.print("└── ", .{}) else std.debug.print("├── ", .{});
+    }
+
+    switch (expr) {
+        .Named => |name| {
+            std.debug.print("Named: {s}\n", .{name});
+        },
+        .Unit => {
+            std.debug.print("Unit\n", .{});
+        },
+        .Product => |prod| {
+            std.debug.print("Product\n", .{});
+
+            treeLines[depth] = !isLast;
+
+            prettyPrintRecType(prod.left.*.kind, depth + 1, treeLines, false);
+            prettyPrintRecType(prod.right.*.kind, depth + 1, treeLines, true);
+        },
+        .Function => |func| {
+            std.debug.print("Function\n", .{});
+
+            treeLines[depth] = !isLast;
+
+            prettyPrintRecType(func.domain.*.kind, depth + 1, treeLines, false);
+            prettyPrintRecType(func.codomain.*.kind, depth + 1, treeLines, true);
+        },
+    }
+}
+
 fn prettyPrintRec(
     expr: ast.ExprKind,
     depth: usize,
@@ -136,13 +182,14 @@ fn prettyPrintRec(
             }
         },
         .FunctionTypeSignature => |sig| {
-            std.debug.print("TypeSignature: {s}\n", .{sig.name});
+            std.debug.print("FunctionTypeSignature: {s}\n", .{sig.name});
 
             treeLines[depth] = !isLast;
 
-            prettyPrintRec(sig.domain.*.kind, depth + 1, treeLines, false);
+            const func = sig.ty.kind.Function;
+            prettyPrintRecType(func.domain.kind, depth + 1, treeLines, false);
 
-            prettyPrintRec(sig.codomain.*.kind, depth + 1, treeLines, true);
+            prettyPrintRecType(func.codomain.kind, depth + 1, treeLines, true);
         },
         .FunctionDef => |def| {
             std.debug.print("FunctionDef: {s}\n", .{def.name});
@@ -285,15 +332,20 @@ fn prettyPrintRecCheck(
             }
         },
         .FunctionTypeSignature => |sig| {
-            std.debug.print("TypeSignature: {s} (typeId: {d})\n", .{ sig.name, expr.typeId });
+            std.debug.print("TypeSignature: {s} :: {d} -> {d} (typeId: {d})\n", .{
+                sig.name,
+                sig.domain.typeId,
+                sig.codomain.typeId,
+                expr.typeId,
+            });
 
             treeLines[depth] = !isLast;
 
             // Child 1: Domain (Input) - Not Last
-            prettyPrintRecCheck(sig.domain, depth + 1, treeLines, false);
-
-            // Child 2: Codomain (Output) - Last
-            prettyPrintRecCheck(sig.codomain, depth + 1, treeLines, true);
+            // prettyPrintRecCheck(sig.domain, depth + 1, treeLines, false);
+            //
+            // // Child 2: Codomain (Output) - Last
+            // prettyPrintRecCheck(sig.codomain, depth + 1, treeLines, true);
         },
         .FunctionDecl => |def| {
             std.debug.print("FunctionDecl: {s} (typeId: {d})\n", .{ def.name, expr.typeId });

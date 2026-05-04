@@ -11,6 +11,7 @@ const Span = span.Span;
 const Location = span.Location;
 
 const Expr = ast.Expr;
+const TypeExpr = ast.TypeExpr;
 const BinaryOperator = ast.BinaryOperator;
 const UnaryOperator = ast.UnaryOperator;
 const Precedence = ast.Precedence;
@@ -270,17 +271,24 @@ pub const Parser = struct {
 
         // const semicl = try self.expect(.Semicolon);
 
-        return self.heapAlloc(Expr, Expr{
-            .kind = .{ .FunctionTypeSignature = .{
-                .name = name.kind.Identifier,
+        const func_type = try self.heapAlloc(TypeExpr, TypeExpr{
+            .kind = .{ .Function = .{
                 .domain = domain,
                 .codomain = codomain,
             } },
             .span = Span.join(name.span, codomain.span),
         });
+
+        return self.heapAlloc(Expr, .{
+            .kind = .{ .FunctionTypeSignature = .{
+                .name = name.kind.Identifier,
+                .ty = func_type,
+            } },
+            .span = Span.join(name.span, codomain.span),
+        });
     }
 
-    fn parseTypeExpression(self: *Parser, prec: Precedence) !*Expr {
+    fn parseTypeExpression(self: *Parser, prec: Precedence) !*const TypeExpr {
         var left = try self.parseTypePrefix();
 
         while (self.currentToken().kind != .Eof and self.currentPrec() > @intFromEnum(prec)) {
@@ -288,26 +296,26 @@ pub const Parser = struct {
             std.debug.print("TOK: {f}\n", .{tok});
 
             // Only allow Type-valid operators here
-            var op: BinaryOperator = undefined;
-            switch (tok.kind) {
-                .Cross => {
-                    op = .TypeProduct;
-                }, // `×` symbol
-                .Caret => {
-                    op = .Exponent;
-                }, // `^` symbol
-                else => return left,
-            }
+            // var op: BinaryOperator = undefined;
+            // switch (tok.kind) {
+            //     .Cross => {
+            //         op = .TypeProduct;
+            //     }, // `×` symbol
+            //     .Caret => {
+            //         op = .Exponent;
+            //     }, // `^` symbol
+            //     else => return left,
+            // }
 
-            self.advance();
+            // self.advance();
+            _ = try self.expect(.Cross); // consume the `×` symbol
 
             // Recurse for the right side
             const right = try self.parseTypeExpression(self.getTokenPrec(tok.kind));
 
-            left = try self.heapAlloc(Expr, .{
-                .kind = .{ .Binary = .{
+            left = try self.heapAlloc(TypeExpr, TypeExpr{
+                .kind = .{ .Product = .{
                     .left = left,
-                    .operator = op,
                     .right = right,
                 } },
                 .span = Span.join(left.span, right.span),
@@ -317,27 +325,37 @@ pub const Parser = struct {
         return left;
     }
 
-    fn parseTypePrefix(self: *Parser) !*Expr {
+    fn parseTypeIdentifier(self: *Parser) !*TypeExpr {
+        const start_span = self.currentToken().span;
+        const name = try self.expectIdent(); // consumes the ident
+
+        return self.heapAlloc(TypeExpr, TypeExpr{
+            .kind = .{ .Named = name },
+            .span = Span.join(start_span, start_span),
+        });
+    }
+
+    fn parseTypePrefix(self: *Parser) !*const TypeExpr {
         switch (self.currentToken().kind) {
-            .Identifier => return try self.parseIdentifier(),
-            .IntLiteral => return try self.parseIntLiteral(),
+            .Identifier => return try self.parseTypeIdentifier(),
+            // .IntLiteral => return try self.parseIntLiteral(), // FIXME: what?
             .LParen => return try self.parseTypeGroupExpression(),
             else => {
-                std.debug.print("CURRENT: {f}\n", .{self.currentToken()});
+                std.debug.panic("&&&&& expected type: CURRENT: {f}\n", .{self.currentToken()});
                 return error.ExpectedType;
             },
         }
     }
 
-    fn parseTypeGroupExpression(self: *Parser) anyerror!*Expr {
+    fn parseTypeGroupExpression(self: *Parser) anyerror!*const TypeExpr {
         const startSpan = self.currentToken().span;
         self.advance(); // consume the left paren
 
         if (self.currentToken().kind == .RParen) {
             const endSpan = self.currentToken().span;
             self.advance(); // consume the right paren
-            return self.heapAlloc(Expr, .{
-                .kind = .{ .Identifier = "Unit" },
+            return self.heapAlloc(TypeExpr, .{
+                .kind = .Unit,
                 .span = Span.join(startSpan, endSpan),
             });
         }
@@ -483,7 +501,7 @@ pub const Parser = struct {
 
         const name = try self.expectIdent(); // consume the ident
 
-        var ty: ?*const Expr = null;
+        var ty: ?*const TypeExpr = null;
         if (self.currentToken().kind == .In) {
             self.advance(); // consume the `in`
             // ty = try self.expectIdent();
@@ -586,6 +604,7 @@ pub const Parser = struct {
         return error.UnexpectedToken;
     }
 
+    /// consumes the current token if it's an identifier and returns its string value, otherwise returns an error
     fn expectIdent(self: *Parser) ![]const u8 {
         switch (self.currentToken().kind) {
             .Identifier => |ident| {

@@ -2,8 +2,19 @@ const std = @import("std");
 pub const TypeId = usize;
 const Span = @import("span.zig").Span;
 
+pub const BuiltinTypes = struct {
+    Unit: TypeId,
+    Int: TypeId,
+    Bool: TypeId,
+    Error: TypeId,
+};
+
 pub const Type = union(enum) {
-    Named: []const u8,
+    // builtins
+    Unit,
+    Int,
+    Bool,
+    Error,
 
     Function: struct {
         // NOTE: makes no sense
@@ -21,18 +32,32 @@ pub const Type = union(enum) {
 pub const TypeStore = struct {
     allocator: std.mem.Allocator,
     types: std.ArrayList(Type),
+    builtins: BuiltinTypes,
 
     pub fn init(allocator: std.mem.Allocator) TypeStore {
-        return TypeStore{
+        var store = TypeStore{
             .allocator = allocator,
             .types = .empty,
+            .builtins = undefined,
         };
+
+        store.builtins = .{
+            .Unit = store.appendType(.Unit) catch unreachable,
+            .Int = store.appendType(.Int) catch unreachable,
+            .Bool = store.appendType(.Bool) catch unreachable,
+            .Error = store.appendType(.Error) catch unreachable,
+        };
+
+        return store;
     }
 
     pub fn format(self: TypeStore, writer: *std.Io.Writer) !void {
         for (self.types.items, 0..) |typ, id| {
             switch (typ) {
-                .Named => try writer.print("{s} [{d}]\n", .{ typ.Named, id }),
+                .Unit => try writer.print("Unit [{d}]\n", .{id}),
+                .Int => try writer.print("Int [{d}]\n", .{id}),
+                .Bool => try writer.print("Bool [{d}]\n", .{id}),
+                .Error => try writer.print("Error [{d}]\n", .{id}),
                 .Function => |fn_ty| try writer.print("({d} -> {d}) [{d}]\n", .{
                     fn_ty.domain,
                     fn_ty.codomain,
@@ -47,7 +72,13 @@ pub const TypeStore = struct {
         }
     }
 
-    /// Adds a type to the store if it doesn't already exist, returning its TypeId.
+    fn appendType(self: *TypeStore, typ: Type) !TypeId {
+        const id = self.types.items.len;
+        try self.types.append(self.allocator, typ);
+        return id;
+    }
+
+    /// Adds a type to the store if it doesn't already exist, returning its `TypeId`.
     pub fn addType(self: *TypeStore, typ: Type) !TypeId {
         if (self.get(typ)) |id| return id;
 
@@ -56,16 +87,20 @@ pub const TypeStore = struct {
         return typeId;
     }
 
+    pub fn resolve(self: *const TypeStore, name: []const u8) ?TypeId {
+        if (std.mem.eql(u8, name, "Unit")) return self.builtins.Unit;
+        if (std.mem.eql(u8, name, "Int")) return self.builtins.Int;
+        if (std.mem.eql(u8, name, "Bool")) return self.builtins.Bool;
+        // no "Error" — that's internal, not a user-facing type name
+        return null; // eventually: search user-defined types too
+    }
+
     pub fn get(self: *const TypeStore, typ: Type) ?TypeId {
         switch (typ) {
-            .Named => {
-                const name = typ.Named;
-                for (self.types.items, 0..) |item, idx| {
-                    if (std.meta.activeTag(item) == .Named and std.mem.eql(u8, item.Named, name)) {
-                        return idx;
-                    }
-                }
-            },
+            .Unit => return self.builtins.Unit,
+            .Int => return self.builtins.Int,
+            .Bool => return self.builtins.Bool,
+            .Error => return self.builtins.Error,
             .Function => |fn_ty| {
                 for (self.types.items, 0..) |item, idx| {
                     if (std.meta.activeTag(item) == .Function and
@@ -110,7 +145,10 @@ pub const TypeStore = struct {
         }
         const typ = self.types.items[typeId];
         switch (typ) {
-            .Named => return typ.Named,
+            .Unit => return "Unit",
+            .Int => return "Int",
+            .Bool => return "Bool",
+            .Error => return "Error",
             .Function => |fn_ty| {
                 const domain_name = self.formatTypeName(fn_ty.domain);
                 const codomain_name = self.formatTypeName(fn_ty.codomain);

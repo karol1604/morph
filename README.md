@@ -5,24 +5,27 @@ _morph_ is my (n+1)-th attempt at making a statically typed, compiled language. 
 My goal with the syntax of _morph_ is for it to somewhat resemble mathematical writing. Here's what an example file would look like (wip):
 
 ```morph
-module Physics;
+module Physics
 
-// Type Aliases using Unicode
-type Vector2 = ℝ × ℝ;
+-- Type Aliases using Unicode
+type Vector2 = ℝ × ℝ
 
-magnitude : Vector2 -> ℝ;
-magnitude(v) = {
-    val (x, y) = v;
-    sqrt(x^2 + y^2)
+add : Nat × Nat -> Nat
+add x y => x + y
+
+magnitude : Vector2 -> ℝ
+magnitude v => {
+    val (x, y) = v
+    sqrt(add(x^2, y^2))
 }
 
-// Block logic with implicit returns
-classify : ℝ -> ℤ;
-classify(n) = {
+-- Block logic with implicit returns
+classify : ℝ -> Set { -1, 0, 1 }
+classify n => {
     check {
-        | n > 0.0 ⇒ 1;  // Positive
-        | n < 0.0 ⇒ -1; // Negative
-        | otherwise ⇒ 0;
+        | n > 0.0 => 1  -- Positive
+        | n < 0.0 => -1 -- Negative
+        | otherwise => 0
     }
 }
 ```

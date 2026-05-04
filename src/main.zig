@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const zspan = @import("zspan");
+
 const checker = @import("checker.zig");
 const codegen = @import("codegen.zig");
 const context = @import("context.zig");
@@ -11,7 +13,6 @@ const Span = @import("span.zig").Span;
 const targ = @import("target.zig");
 const parserTests = @import("tests/parser.zig");
 const utils = @import("utils.zig");
-const zspan = @import("zspan");
 
 fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
     for (ctx.diagnostics.items) |diag| {

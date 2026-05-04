@@ -1,5 +1,24 @@
 const std = @import("std");
+
 const span = @import("span.zig");
+
+pub const TypeExpr = struct {
+    kind: TypeExprKind,
+    span: span.Span,
+};
+
+pub const TypeExprKind = union(enum) {
+    Named: []const u8,
+    Unit,
+    Product: struct {
+        left: *const TypeExpr,
+        right: *const TypeExpr,
+    },
+    Function: struct {
+        domain: *const TypeExpr,
+        codomain: *const TypeExpr,
+    },
+};
 
 pub const Expr = struct {
     kind: ExprKind,
@@ -26,8 +45,7 @@ pub const ExprKind = union(enum) {
     VariableDecl: struct {
         name: []const u8,
         value: *const Expr,
-        // type: ?[]const u8, // TODO: make this a proper type expression
-        type: ?*const Expr,
+        type: ?*const TypeExpr,
     },
 
     Block: struct {
@@ -37,8 +55,9 @@ pub const ExprKind = union(enum) {
 
     FunctionTypeSignature: struct {
         name: []const u8,
-        domain: *const Expr,
-        codomain: *const Expr,
+        // domain: *const Expr, // TODO: replace by a proper type expression
+        // codomain: *const Expr, // TODO: replace by a proper type expression
+        ty: *const TypeExpr,
     },
 
     FunctionDef: struct {

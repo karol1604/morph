@@ -3,6 +3,11 @@ const ast = @import("ast.zig");
 const TypeId = @import("type_store.zig").TypeId;
 const Span = @import("span.zig").Span;
 
+pub const CheckedTypeExpr = struct {
+    typeId: TypeId,
+    span: Span,
+};
+
 pub const CheckedExpr = struct {
     typeId: TypeId,
     kind: CheckedExprKind,
@@ -48,8 +53,8 @@ pub const CheckedExprKind = union(enum) {
 
     FunctionTypeSignature: struct {
         name: []const u8,
-        domain: *const CheckedExpr,
-        codomain: *const CheckedExpr,
+        domain: CheckedTypeExpr,
+        codomain: CheckedTypeExpr,
     },
 
     FunctionDecl: struct {
