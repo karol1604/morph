@@ -20,8 +20,8 @@ pub const RegisterName = enum {
 pub const Register = struct {
     name: RegisterName,
     kind: enum {
-        CallerSaved,
-        CalleeSaved,
+        caller_saved,
+        callee_saved,
     },
 
     pub fn format(self: Register, writer: *std.Io.Writer) !void {
@@ -30,54 +30,54 @@ pub const Register = struct {
 };
 
 pub const ARGUMENT_REGISTERS = [_]Register{
-    .{ .name = .x0, .kind = .CallerSaved },
-    .{ .name = .x1, .kind = .CallerSaved },
-    .{ .name = .x2, .kind = .CallerSaved },
-    .{ .name = .x3, .kind = .CallerSaved },
-    .{ .name = .x4, .kind = .CallerSaved },
-    .{ .name = .x5, .kind = .CallerSaved },
-    .{ .name = .x6, .kind = .CallerSaved },
-    .{ .name = .x7, .kind = .CallerSaved },
+    .{ .name = .x0, .kind = .caller_saved },
+    .{ .name = .x1, .kind = .caller_saved },
+    .{ .name = .x2, .kind = .caller_saved },
+    .{ .name = .x3, .kind = .caller_saved },
+    .{ .name = .x4, .kind = .caller_saved },
+    .{ .name = .x5, .kind = .caller_saved },
+    .{ .name = .x6, .kind = .caller_saved },
+    .{ .name = .x7, .kind = .caller_saved },
 };
 
 pub const ALLOCATABLE = [_]Register{
-    .{ .name = .x0, .kind = .CallerSaved },
-    .{ .name = .x1, .kind = .CallerSaved },
-    .{ .name = .x2, .kind = .CallerSaved },
-    .{ .name = .x3, .kind = .CallerSaved },
-    .{ .name = .x4, .kind = .CallerSaved },
-    .{ .name = .x5, .kind = .CallerSaved },
-    .{ .name = .x6, .kind = .CallerSaved },
-    .{ .name = .x7, .kind = .CallerSaved },
+    .{ .name = .x0, .kind = .caller_saved },
+    .{ .name = .x1, .kind = .caller_saved },
+    .{ .name = .x2, .kind = .caller_saved },
+    .{ .name = .x3, .kind = .caller_saved },
+    .{ .name = .x4, .kind = .caller_saved },
+    .{ .name = .x5, .kind = .caller_saved },
+    .{ .name = .x6, .kind = .caller_saved },
+    .{ .name = .x7, .kind = .caller_saved },
     // caller-saved, non-argument
-    .{ .name = .x9, .kind = .CallerSaved },
-    .{ .name = .x10, .kind = .CallerSaved },
-    .{ .name = .x11, .kind = .CallerSaved },
-    .{ .name = .x12, .kind = .CallerSaved },
-    .{ .name = .x13, .kind = .CallerSaved },
-    .{ .name = .x14, .kind = .CallerSaved },
-    .{ .name = .x15, .kind = .CallerSaved },
+    .{ .name = .x9, .kind = .caller_saved },
+    .{ .name = .x10, .kind = .caller_saved },
+    .{ .name = .x11, .kind = .caller_saved },
+    .{ .name = .x12, .kind = .caller_saved },
+    .{ .name = .x13, .kind = .caller_saved },
+    .{ .name = .x14, .kind = .caller_saved },
+    .{ .name = .x15, .kind = .caller_saved },
     // callee-saved
-    .{ .name = .x19, .kind = .CalleeSaved },
-    .{ .name = .x20, .kind = .CalleeSaved },
-    .{ .name = .x21, .kind = .CalleeSaved },
-    .{ .name = .x22, .kind = .CalleeSaved },
-    .{ .name = .x23, .kind = .CalleeSaved },
-    .{ .name = .x24, .kind = .CalleeSaved },
-    .{ .name = .x25, .kind = .CalleeSaved },
-    .{ .name = .x26, .kind = .CalleeSaved },
-    .{ .name = .x27, .kind = .CalleeSaved },
-    .{ .name = .x28, .kind = .CalleeSaved },
+    .{ .name = .x19, .kind = .callee_saved },
+    .{ .name = .x20, .kind = .callee_saved },
+    .{ .name = .x21, .kind = .callee_saved },
+    .{ .name = .x22, .kind = .callee_saved },
+    .{ .name = .x23, .kind = .callee_saved },
+    .{ .name = .x24, .kind = .callee_saved },
+    .{ .name = .x25, .kind = .callee_saved },
+    .{ .name = .x26, .kind = .callee_saved },
+    .{ .name = .x27, .kind = .callee_saved },
+    .{ .name = .x28, .kind = .callee_saved },
 };
 
 pub const Allocation = union(enum) {
-    Reg: Register,
-    Spill: usize, // stack slot index
+    reg: Register,
+    spil: usize, // stack slot index
 
     pub fn format(self: Allocation, writer: *std.Io.Writer) !void {
         switch (self) {
-            .Reg => |reg| try reg.format(writer),
-            .Spill => |slot| try writer.print("spill{d}", .{slot}),
+            .reg => |reg| try reg.format(writer),
+            .spil => |slot| try writer.print("spill{d}", .{slot}),
         }
     }
 };
@@ -85,8 +85,8 @@ pub const Allocation = union(enum) {
 // based on the poletto sarkar paper
 pub const RegisterAllocator = struct {
     intervals: []liveness.LiveInterval,
-    availableRegisters: std.ArrayList(Register),
-    activeIntervals: std.ArrayList(liveness.LiveInterval),
+    available_regs: std.ArrayList(Register),
+    active_intervals: std.ArrayList(liveness.LiveInterval),
     allocations: std.HashMap(
         liveness.LivenessKey,
         Allocation,
@@ -98,15 +98,15 @@ pub const RegisterAllocator = struct {
     log: std.ArrayList(AllocEvent),
 
     pub fn init(intervals: []liveness.LiveInterval, alloc: std.mem.Allocator) !RegisterAllocator {
-        var availableRegisters: std.ArrayList(Register) = .empty;
+        var available_regs: std.ArrayList(Register) = .empty;
         for (ALLOCATABLE) |reg| {
-            try availableRegisters.append(alloc, reg);
+            try available_regs.append(alloc, reg);
         }
 
         return RegisterAllocator{
             .intervals = intervals,
-            .availableRegisters = availableRegisters,
-            .activeIntervals = .empty,
+            .available_regs = available_regs,
+            .active_intervals = .empty,
             .log = .empty,
             .allocations = std.HashMap(
                 liveness.LivenessKey,
@@ -127,15 +127,17 @@ pub const RegisterAllocator = struct {
 
             try self.expireOldIntervals(interval);
 
-            if (self.availableRegisters.items.len == 0) {
+            if (self.available_regs.items.len == 0) {
                 // no registers available, need to spill
                 try self.spillAtInterval(interval);
             } else {
                 // allocate a register
-                const reg = self.availableRegisters.orderedRemove(0);
-                _ = try self.allocations.put(interval.key, .{ .Reg = reg });
+                const reg = self.available_regs.orderedRemove(0);
+                _ = try self.allocations.put(interval.key, .{ .reg = reg });
                 try self.insertSortedByEndIntoActive(interval);
-                try self.log.append(self.alloc, .{ .Assigned = .{ .key = interval.key, .reg = reg, .interval = interval } });
+                try self.log.append(self.alloc, .{
+                    .assigned = .{ .key = interval.key, .reg = reg, .interval = interval },
+                });
             }
         }
     }
@@ -144,19 +146,19 @@ pub const RegisterAllocator = struct {
         std.debug.print("=== Register Allocator Log ===\n", .{});
         for (self.log.items) |event| {
             switch (event) {
-                .Assigned => |e| std.debug.print(
+                .assigned => |e| std.debug.print(
                     "  assign  {f} -> {s}\n",
                     .{ e.interval, e.reg.name.toString() },
                 ),
-                .Expired => |e| std.debug.print(
+                .expired => |e| std.debug.print(
                     "  expire  {f} frees {s}\n",
                     .{ e.key, e.reg.name.toString() },
                 ),
-                .Evicted => |e| std.debug.print(
+                .evicted => |e| std.debug.print(
                     "  evict   {f} -> spill{d}  (replaced by {f})\n",
                     .{ e.key, e.slot, e.replacedBy },
                 ),
-                .Spilled => |e| std.debug.print(
+                .spilled => |e| std.debug.print(
                     "  spill   {f} -> spill{d}\n",
                     .{ e.key, e.slot },
                 ),
@@ -170,40 +172,46 @@ pub const RegisterAllocator = struct {
     }
 
     fn expireOldIntervals(self: *RegisterAllocator, current: liveness.LiveInterval) !void {
-        while (self.activeIntervals.items.len > 0) {
-            const active = self.activeIntervals.items[0];
+        while (self.active_intervals.items.len > 0) {
+            const active = self.active_intervals.items[0];
             if (active.end > current.start) return;
-            _ = self.activeIntervals.orderedRemove(0);
+            _ = self.active_intervals.orderedRemove(0);
             if (self.allocations.get(active.key)) |r| {
-                try self.availableRegisters.append(self.alloc, r.Reg);
-                std.sort.insertion(Register, self.availableRegisters.items, {}, compareRegisters);
-                try self.log.append(self.alloc, .{ .Expired = .{ .key = active.key, .reg = r.Reg } });
+                try self.available_regs.append(self.alloc, r.reg);
+                std.sort.insertion(Register, self.available_regs.items, {}, compareRegisters);
+                try self.log.append(self.alloc, .{
+                    .expired = .{ .key = active.key, .reg = r.reg },
+                });
             }
         }
     }
 
     fn spillAtInterval(self: *RegisterAllocator, interval: liveness.LiveInterval) !void {
-        const spill = self.activeIntervals.items[self.activeIntervals.items.len - 1]; // spill the interval with the furthest end
+        const spill = self.active_intervals.items[self.active_intervals.items.len - 1]; // spill the interval with the furthest end
         if (spill.end > interval.end) {
             // evict spill
-            const reg = self.allocations.get(spill.key) orelse @panic("active interval without register allocation");
-            _ = try self.allocations.put(interval.key, .{ .Reg = reg.Reg }); // NOTE: is this safe?
+            const reg = self.allocations.get(spill.key) orelse
+                @panic("active interval without register allocation");
+
+            _ = try self.allocations.put(interval.key, .{ .reg = reg.reg }); // NOTE: is this safe?
             const slot = self.newSpillSlot();
-            _ = try self.allocations.put(spill.key, .{ .Spill = slot });
-            try self.log.append(self.alloc, .{ .Evicted = .{
+            _ = try self.allocations.put(spill.key, .{ .spil = slot });
+            try self.log.append(self.alloc, .{ .evicted = .{
                 .key = spill.key,
                 .slot = slot,
                 .replacedBy = interval.key,
             } });
 
             // NOTE: this works but note for future me
-            _ = self.activeIntervals.swapRemove(self.activeIntervals.items.len - 1);
+            _ = self.active_intervals.swapRemove(self.active_intervals.items.len - 1);
             try self.insertSortedByEndIntoActive(interval);
         } else {
             // spill current
             const slot = self.newSpillSlot();
-            _ = try self.allocations.put(interval.key, .{ .Spill = slot });
-            try self.log.append(self.alloc, .{ .Spilled = .{ .key = interval.key, .slot = slot } });
+            _ = try self.allocations.put(interval.key, .{ .spil = slot });
+            try self.log.append(self.alloc, .{
+                .spilled = .{ .key = interval.key, .slot = slot },
+            });
         }
     }
 
@@ -213,12 +221,15 @@ pub const RegisterAllocator = struct {
         return slot;
     }
 
-    pub fn insertSortedByEndIntoActive(self: *RegisterAllocator, interval: liveness.LiveInterval) !void {
+    pub fn insertSortedByEndIntoActive(
+        self: *RegisterAllocator,
+        interval: liveness.LiveInterval,
+    ) !void {
         var i: usize = 0;
-        while (i < self.activeIntervals.items.len) : (i += 1) {
-            if (self.activeIntervals.items[i].end > interval.end) break;
+        while (i < self.active_intervals.items.len) : (i += 1) {
+            if (self.active_intervals.items[i].end > interval.end) break;
         }
-        try self.activeIntervals.insert(self.alloc, i, interval);
+        try self.active_intervals.insert(self.alloc, i, interval);
     }
 
     fn sortLiveIntervals(intervals: []liveness.LiveInterval) void {
@@ -239,8 +250,8 @@ fn compareRegisters(_: void, a: Register, b: Register) bool {
 
 // NOTE: used only for debugging
 pub const AllocEvent = union(enum) {
-    Assigned: struct { key: liveness.LivenessKey, reg: Register, interval: liveness.LiveInterval },
-    Expired: struct { key: liveness.LivenessKey, reg: Register },
-    Evicted: struct { key: liveness.LivenessKey, slot: usize, replacedBy: liveness.LivenessKey },
-    Spilled: struct { key: liveness.LivenessKey, slot: usize },
+    assigned: struct { key: liveness.LivenessKey, reg: Register, interval: liveness.LiveInterval },
+    expired: struct { key: liveness.LivenessKey, reg: Register },
+    evicted: struct { key: liveness.LivenessKey, slot: usize, replacedBy: liveness.LivenessKey },
+    spilled: struct { key: liveness.LivenessKey, slot: usize },
 };

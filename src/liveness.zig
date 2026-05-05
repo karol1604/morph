@@ -4,13 +4,13 @@ const IRFunction = ir.IRFunction;
 
 // NOTE: is this good?
 pub const LivenessKey = union(enum) {
-    Temp: usize,
-    Var: []const u8,
+    temp: usize,
+    variable: []const u8,
 
     pub fn format(self: LivenessKey, writer: *std.Io.Writer) !void {
         switch (self) {
-            .Temp => |id| try writer.print("Temp(t{d})", .{id}),
-            .Var => |name| try writer.print("Var({s})", .{name}),
+            .temp => |id| try writer.print("Temp(t{d})", .{id}),
+            .variable => |name| try writer.print("Var({s})", .{name}),
         }
     }
 };
@@ -23,8 +23,8 @@ pub const LiveInterval = struct {
     pub fn format(self: LiveInterval, writer: *std.Io.Writer) !void {
         try writer.print("LiveInterval {{ ", .{});
         switch (self.key) {
-            .Temp => |id| try writer.print("Temp(t{d}) ", .{id}),
-            .Var => |name| try writer.print("Var({s}) ", .{name}),
+            .temp => |id| try writer.print("Temp(t{d}) ", .{id}),
+            .variable => |name| try writer.print("Var({s}) ", .{name}),
         }
         try writer.print("start: {d}, end: {d} }}", .{ self.start, self.end });
     }
@@ -34,11 +34,11 @@ pub const LivenessKeyContext = struct {
     pub fn hash(_: LivenessKeyContext, key: LivenessKey) u64 {
         var hasher = std.hash.Wyhash.init(0);
         switch (key) {
-            .Temp => |id| {
+            .temp => |id| {
                 hasher.update("t");
                 hasher.update(std.mem.asBytes(&id));
             },
-            .Var => |name| {
+            .variable => |name| {
                 hasher.update("v");
                 hasher.update(name);
             },
@@ -48,32 +48,37 @@ pub const LivenessKeyContext = struct {
 
     pub fn eql(_: LivenessKeyContext, a: LivenessKey, b: LivenessKey) bool {
         return switch (a) {
-            .Temp => |a_id| switch (b) {
-                .Temp => |b_id| a_id == b_id,
-                .Var => false,
+            .temp => |a_id| switch (b) {
+                .temp => |b_id| a_id == b_id,
+                .variable => false,
             },
-            .Var => |a_name| switch (b) {
-                .Var => |b_name| std.mem.eql(u8, a_name, b_name),
-                .Temp => false,
+            .variable => |a_name| switch (b) {
+                .variable => |b_name| std.mem.eql(u8, a_name, b_name),
+                .temp => false,
             },
         };
     }
 };
 
 // basically a hashset
-const LivenessSet = std.HashMap(LivenessKey, void, LivenessKeyContext, std.hash_map.default_max_load_percentage);
+const LivenessSet = std.HashMap(
+    LivenessKey,
+    void,
+    LivenessKeyContext,
+    std.hash_map.default_max_load_percentage,
+);
 
 pub const BlockInfo = struct {
     use: LivenessSet,
     def: LivenessSet,
-    liveIn: LivenessSet,
-    liveOut: LivenessSet,
+    live_in: LivenessSet,
+    live_out: LivenessSet,
     successors: []const usize, // indices of successor blocks
-    instrStart: usize, // index of first instruction in block
-    instrEnd: usize, // index of last instruction in block
+    instr_start: usize, // index of first instruction in block
+    instr_end: usize, // index of last instruction in block
 
     pub fn format(self: BlockInfo, writer: *std.Io.Writer) !void {
-        try writer.print("  instrs: [{d}, {d}]\n", .{ self.instrStart, self.instrEnd });
+        try writer.print("  instrs: [{d}, {d}]\n", .{ self.instr_start, self.instr_end });
 
         try writer.print("  successors: [", .{});
         for (self.successors, 0..) |succ, i| {
@@ -89,10 +94,10 @@ pub const BlockInfo = struct {
         try formatKeySet(self.def, writer);
 
         try writer.print("  live_in:  ", .{});
-        try formatKeySet(self.liveIn, writer);
+        try formatKeySet(self.live_in, writer);
 
         try writer.print("  live_out: ", .{});
-        try formatKeySet(self.liveOut, writer);
+        try formatKeySet(self.live_out, writer);
     }
 
     fn formatKeySet(set: LivenessSet, writer: *std.Io.Writer) !void {
@@ -100,8 +105,8 @@ pub const BlockInfo = struct {
         var it = set.keyIterator();
         while (it.next()) |key| {
             switch (key.*) {
-                .Temp => |id| try writer.print("t{d} ", .{id}),
-                .Var => |name| try writer.print("{s} ", .{name}),
+                .temp => |id| try writer.print("t{d} ", .{id}),
+                .variable => |name| try writer.print("{s} ", .{name}),
             }
         }
         try writer.print("}}\n", .{});
@@ -111,33 +116,40 @@ pub const BlockInfo = struct {
 pub fn analyze(func: *const IRFunction, alloc: std.mem.Allocator) ![]LiveInterval {
     const blocks = try alloc.alloc(BlockInfo, func.blocks.items.len);
     numberInstructions(func, blocks, alloc);
-    const indexMap = try buildBlockIndexMap(func, alloc);
-    buildCFG(func, blocks, alloc, indexMap);
+    const index_map = try buildBlockIndexMap(func, alloc);
+    buildCFG(func, blocks, alloc, index_map);
     try computeUseDefSets(func, blocks);
     try computeLiveness(blocks, alloc);
     return try buildIntervals(func, blocks, alloc);
 }
 
-fn numberInstructions(func: *const IRFunction, blocks: []BlockInfo, allocator: std.mem.Allocator) void {
+fn numberInstructions(
+    func: *const IRFunction,
+    blocks: []BlockInfo,
+    allocator: std.mem.Allocator,
+) void {
     var counter: usize = 0;
     for (func.blocks.items, 0..) |block, i| {
         blocks[i] = BlockInfo{
-            .instrStart = 0,
-            .instrEnd = 0,
+            .instr_start = 0,
+            .instr_end = 0,
             .successors = &.{},
             .use = LivenessSet.init(allocator),
             .def = LivenessSet.init(allocator),
-            .liveIn = LivenessSet.init(allocator),
-            .liveOut = LivenessSet.init(allocator),
+            .live_in = LivenessSet.init(allocator),
+            .live_out = LivenessSet.init(allocator),
         };
-        blocks[i].instrStart = counter;
+        blocks[i].instr_start = counter;
         counter += block.instructions.items.len;
         counter += 1; // terminator
-        blocks[i].instrEnd = counter - 1;
+        blocks[i].instr_end = counter - 1;
     }
 }
 
-fn buildBlockIndexMap(func: *const IRFunction, alloc: std.mem.Allocator) !std.AutoHashMap(usize, usize) {
+fn buildBlockIndexMap(
+    func: *const IRFunction,
+    alloc: std.mem.Allocator,
+) !std.AutoHashMap(usize, usize) {
     var map = std.AutoHashMap(usize, usize).init(alloc);
     for (func.blocks.items, 0..) |block, localIdx| {
         try map.put(block.id, localIdx);
@@ -149,23 +161,23 @@ fn buildCFG(
     func: *const IRFunction,
     blocks: []BlockInfo,
     alloc: std.mem.Allocator,
-    indexMap: std.AutoHashMap(usize, usize),
+    index_map: std.AutoHashMap(usize, usize),
 ) void {
     for (func.blocks.items, 0..) |block, i| {
         const term = block.terminator.?; // TODO: is this safe?
         switch (term) {
-            .Return, .Exit => {
+            .@"return", .exit => {
                 blocks[i].successors = &[_]usize{};
             },
-            .Jump => |target| {
+            .jump => |target| {
                 const s = alloc.alloc(usize, 1) catch @panic("allocation failed");
-                s[0] = indexMap.get(target).?; // get local index of target block
+                s[0] = index_map.get(target).?; // get local index of target block
                 blocks[i].successors = s;
             },
-            .ConditionalJump => |cj| {
+            .cond_jump => |cj| {
                 const s = alloc.alloc(usize, 2) catch @panic("allocation failed");
-                s[0] = indexMap.get(cj.trueTarget).?;
-                s[1] = indexMap.get(cj.falseTarget).?;
+                s[0] = index_map.get(cj.true_target).?;
+                s[1] = index_map.get(cj.false_target).?;
                 blocks[i].successors = s;
             },
         }
@@ -179,35 +191,35 @@ pub const InstrOperands = struct {
 
 fn instrInputsAndOutput(instr: ir.Instr) InstrOperands {
     return switch (instr) {
-        .Add => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Sub => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Mul => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Div => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Eq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Neq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Lt => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .LtEq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Gt => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .GtEq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
-        .Assign => |op| .{ .inputs = .{ op.value, null }, .output = op.target },
-        .UnaryMinus => |op| .{ .inputs = .{ op.operand, null }, .output = op.result },
-        .Call => unreachable, // handled separately
+        .add => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .sub => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .mul => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .div => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .eq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .neq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .lt => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .lt_eq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .gt => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .gt_eq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
+        .assign => |op| .{ .inputs = .{ op.value, null }, .output = op.target },
+        .unary_minus => |op| .{ .inputs = .{ op.operand, null }, .output = op.result },
+        .call => unreachable, // handled separately
     };
 }
 
 fn terminatorInput(term: ir.Terminator) ?ir.Operand {
     return switch (term) {
-        .Return => |op| op,
-        .Exit => |op| op,
-        .Jump => null,
-        .ConditionalJump => |cj| cj.condition,
+        .@"return" => |op| op,
+        .exit => |op| op,
+        .jump => null,
+        .cond_jump => |cj| cj.condition,
     };
 }
 
 fn operandToKey(op: ir.Operand) ?LivenessKey {
     return switch (op.value) {
-        .Temp => |id| LivenessKey{ .Temp = id },
-        .Variable => |name| LivenessKey{ .Var = name },
+        .temp => |id| LivenessKey{ .temp = id },
+        .variable => |name| LivenessKey{ .variable = name },
         else => null,
     };
 }
@@ -216,7 +228,7 @@ fn computeUseDefSets(func: *const IRFunction, blocks: []BlockInfo) !void {
     for (func.blocks.items, 0..) |block, i| {
         for (block.instructions.items) |instr| {
             switch (instr) {
-                .Call => |call| {
+                .call => |call| {
                     for (call.args) |arg| {
                         if (operandToKey(arg)) |key| {
                             if (!blocks[i].def.contains(key)) try blocks[i].use.put(key, {});
@@ -258,58 +270,64 @@ fn computeLiveness(blocks: []BlockInfo, alloc: std.mem.Allocator) !void {
     while (changed) {
         changed = false;
         for (0..blocks.len) |i| {
-            const revIdx = blocks.len - 1 - i;
-            var newLiveOut = LivenessSet.init(alloc);
-            for (blocks[revIdx].successors) |succ| {
-                newLiveOut = try mapUnion(newLiveOut, blocks[succ].liveIn, alloc);
+            const rev_idx = blocks.len - 1 - i;
+            var new_live_out = LivenessSet.init(alloc);
+            for (blocks[rev_idx].successors) |succ| {
+                new_live_out = try mapUnion(new_live_out, blocks[succ].live_in, alloc);
             }
 
-            var newLiveIn = LivenessSet.init(alloc);
-            newLiveIn = try mapUnion(
-                blocks[revIdx].use,
-                try mapSubstraction(newLiveOut, blocks[revIdx].def, alloc),
+            var new_live_in = LivenessSet.init(alloc);
+            new_live_in = try mapUnion(
+                blocks[rev_idx].use,
+                try mapSubstraction(new_live_out, blocks[rev_idx].def, alloc),
                 alloc,
             );
 
-            changed = changed or !setsEqual(newLiveOut, blocks[revIdx].liveOut) or !setsEqual(newLiveIn, blocks[revIdx].liveIn);
+            changed = changed or
+                !setsEqual(new_live_out, blocks[rev_idx].live_out) or
+                !setsEqual(new_live_in, blocks[rev_idx].live_in);
 
-            blocks[revIdx].liveOut = newLiveOut;
-            blocks[revIdx].liveIn = newLiveIn;
+            blocks[rev_idx].live_out = new_live_out;
+            blocks[rev_idx].live_in = new_live_in;
         }
     }
 }
 
-fn buildIntervals(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.Allocator) ![]LiveInterval {
-    var intervalMap = std.HashMap(
+fn buildIntervals(
+    func: *const IRFunction,
+    blocks: []BlockInfo,
+    alloc: std.mem.Allocator,
+) ![]LiveInterval {
+    var interval_map = std.HashMap(
         LivenessKey,
         LiveInterval,
         LivenessKeyContext,
         std.hash_map.default_max_load_percentage,
     ).init(alloc);
     for (blocks, func.blocks.items) |blockInfo, irBlock| {
-        var it = blockInfo.liveIn.keyIterator();
+        var it = blockInfo.live_in.keyIterator();
         while (it.next()) |key| {
-            const entry = try intervalMap.getOrPut(key.*);
+            const entry = try interval_map.getOrPut(key.*);
             if (!entry.found_existing) {
                 entry.value_ptr.* = LiveInterval{
                     .key = key.*,
-                    .start = blockInfo.instrStart,
-                    .end = blockInfo.instrEnd,
+                    .start = blockInfo.instr_start,
+                    .end = blockInfo.instr_end,
                 };
             } else {
-                entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instrEnd);
+                entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instr_end);
             }
         }
 
         for (irBlock.instructions.items, 0..) |instr, i| {
-            const idx = blockInfo.instrStart + i;
+            const idx = blockInfo.instr_start + i;
 
             switch (instr) {
-                .Call => |call| {
+                .call => |call| {
                     // inputs: all args
                     for (call.args) |arg| {
                         if (operandToKey(arg)) |key| {
-                            const entry = try intervalMap.getOrPut(key);
+                            const entry = try interval_map.getOrPut(key);
                             if (!entry.found_existing) {
                                 entry.value_ptr.* = .{ .key = key, .start = idx, .end = idx };
                             } else {
@@ -319,7 +337,7 @@ fn buildIntervals(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.A
                     }
                     // output: result
                     if (operandToKey(call.result)) |key| {
-                        const entry = try intervalMap.getOrPut(key);
+                        const entry = try interval_map.getOrPut(key);
                         if (!entry.found_existing) {
                             entry.value_ptr.* = .{ .key = key, .start = idx, .end = idx };
                         }
@@ -331,7 +349,7 @@ fn buildIntervals(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.A
                     for (ops.inputs) |maybeInput| {
                         if (maybeInput) |op| {
                             if (operandToKey(op)) |key| {
-                                const entry = try intervalMap.getOrPut(key);
+                                const entry = try interval_map.getOrPut(key);
                                 if (!entry.found_existing) {
                                     entry.value_ptr.* = LiveInterval{
                                         .key = key,
@@ -347,7 +365,7 @@ fn buildIntervals(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.A
 
                     if (ops.output) |op| {
                         if (operandToKey(op)) |key| {
-                            const entry = try intervalMap.getOrPut(key);
+                            const entry = try interval_map.getOrPut(key);
                             if (!entry.found_existing) {
                                 entry.value_ptr.* = LiveInterval{
                                     .key = key,
@@ -365,23 +383,23 @@ fn buildIntervals(func: *const IRFunction, blocks: []BlockInfo, alloc: std.mem.A
         if (irBlock.terminator) |term| {
             if (terminatorInput(term)) |op| {
                 if (operandToKey(op)) |key| {
-                    const entry = try intervalMap.getOrPut(key);
+                    const entry = try interval_map.getOrPut(key);
                     if (!entry.found_existing) {
                         entry.value_ptr.* = LiveInterval{
                             .key = key,
-                            .start = blockInfo.instrEnd, // terminator is after all instructions
-                            .end = blockInfo.instrEnd,
+                            .start = blockInfo.instr_end, // terminator is after all instructions
+                            .end = blockInfo.instr_end,
                         };
                     } else {
-                        entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instrEnd);
+                        entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instr_end);
                     }
                 }
             }
         }
     }
 
-    var result = try alloc.alloc(LiveInterval, intervalMap.count());
-    var it2 = intervalMap.valueIterator();
+    var result = try alloc.alloc(LiveInterval, interval_map.count());
+    var it2 = interval_map.valueIterator();
     var idx: usize = 0;
     while (it2.next()) |entry| {
         result[idx] = entry.*;

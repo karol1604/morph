@@ -3,26 +3,26 @@ pub const TypeId = usize;
 const Span = @import("span.zig").Span;
 
 pub const BuiltinTypes = struct {
-    Unit: TypeId,
-    Int: TypeId,
-    Bool: TypeId,
-    Error: TypeId,
+    unit: TypeId,
+    int: TypeId,
+    bool: TypeId,
+    err: TypeId,
 };
 
 pub const Type = union(enum) {
     // builtins
-    Unit,
-    Int,
-    Bool,
-    Error,
+    unit,
+    int,
+    bool,
+    err,
 
-    Function: struct {
+    function: struct {
         // NOTE: makes no sense
         domain: TypeId,
         codomain: TypeId,
     },
 
-    Product: struct {
+    product: struct {
         left: TypeId,
         right: TypeId,
     },
@@ -42,10 +42,10 @@ pub const TypeStore = struct {
         };
 
         store.builtins = .{
-            .Unit = store.appendType(.Unit) catch unreachable,
-            .Int = store.appendType(.Int) catch unreachable,
-            .Bool = store.appendType(.Bool) catch unreachable,
-            .Error = store.appendType(.Error) catch unreachable,
+            .unit = store.appendType(.unit) catch unreachable,
+            .int = store.appendType(.int) catch unreachable,
+            .bool = store.appendType(.bool) catch unreachable,
+            .err = store.appendType(.err) catch unreachable,
         };
 
         return store;
@@ -54,16 +54,16 @@ pub const TypeStore = struct {
     pub fn format(self: TypeStore, writer: *std.Io.Writer) !void {
         for (self.types.items, 0..) |typ, id| {
             switch (typ) {
-                .Unit => try writer.print("Unit [{d}]\n", .{id}),
-                .Int => try writer.print("Int [{d}]\n", .{id}),
-                .Bool => try writer.print("Bool [{d}]\n", .{id}),
-                .Error => try writer.print("Error [{d}]\n", .{id}),
-                .Function => |fn_ty| try writer.print("({d} -> {d}) [{d}]\n", .{
+                .unit => try writer.print("Unit [{d}]\n", .{id}),
+                .int => try writer.print("Int [{d}]\n", .{id}),
+                .bool => try writer.print("Bool [{d}]\n", .{id}),
+                .err => try writer.print("Error [{d}]\n", .{id}),
+                .function => |fn_ty| try writer.print("({d} -> {d}) [{d}]\n", .{
                     fn_ty.domain,
                     fn_ty.codomain,
                     id,
                 }),
-                .Product => |prod| try writer.print("({d} × {d}) [{d}]\n", .{
+                .product => |prod| try writer.print("({d} × {d}) [{d}]\n", .{
                     prod.left,
                     prod.right,
                     id,
@@ -82,40 +82,40 @@ pub const TypeStore = struct {
     pub fn addType(self: *TypeStore, typ: Type) !TypeId {
         if (self.get(typ)) |id| return id;
 
-        const typeId = self.types.items.len;
+        const type_id = self.types.items.len;
         try self.types.append(self.allocator, typ);
-        return typeId;
+        return type_id;
     }
 
     pub fn resolve(self: *const TypeStore, name: []const u8) ?TypeId {
-        if (std.mem.eql(u8, name, "Unit")) return self.builtins.Unit;
-        if (std.mem.eql(u8, name, "Int")) return self.builtins.Int;
-        if (std.mem.eql(u8, name, "Bool")) return self.builtins.Bool;
+        if (std.mem.eql(u8, name, "Unit")) return self.builtins.unit;
+        if (std.mem.eql(u8, name, "Int")) return self.builtins.int;
+        if (std.mem.eql(u8, name, "Bool")) return self.builtins.bool;
         // no "Error" — that's internal, not a user-facing type name
         return null; // eventually: search user-defined types too
     }
 
     pub fn get(self: *const TypeStore, typ: Type) ?TypeId {
         switch (typ) {
-            .Unit => return self.builtins.Unit,
-            .Int => return self.builtins.Int,
-            .Bool => return self.builtins.Bool,
-            .Error => return self.builtins.Error,
-            .Function => |fn_ty| {
+            .unit => return self.builtins.unit,
+            .int => return self.builtins.int,
+            .bool => return self.builtins.bool,
+            .err => return self.builtins.err,
+            .function => |fn_ty| {
                 for (self.types.items, 0..) |item, idx| {
-                    if (std.meta.activeTag(item) == .Function and
-                        item.Function.domain == fn_ty.domain and
-                        item.Function.codomain == fn_ty.codomain)
+                    if (std.meta.activeTag(item) == .function and
+                        item.function.domain == fn_ty.domain and
+                        item.function.codomain == fn_ty.codomain)
                     {
                         return idx;
                     }
                 }
             },
-            .Product => |prod| {
+            .product => |prod| {
                 for (self.types.items, 0..) |item, idx| {
-                    if (std.meta.activeTag(item) == .Product and
-                        item.Product.left == prod.left and
-                        item.Product.right == prod.right)
+                    if (std.meta.activeTag(item) == .product and
+                        item.product.left == prod.left and
+                        item.product.right == prod.right)
                     {
                         return idx;
                     }
@@ -139,17 +139,17 @@ pub const TypeStore = struct {
     //     }
     // }
 
-    pub fn formatTypeName(self: *const TypeStore, typeId: TypeId) []const u8 {
-        if (typeId >= self.types.items.len) {
+    pub fn formatTypeName(self: *const TypeStore, type_id: TypeId) []const u8 {
+        if (type_id >= self.types.items.len) {
             return "Unknown";
         }
-        const typ = self.types.items[typeId];
+        const typ = self.types.items[type_id];
         switch (typ) {
-            .Unit => return "Unit",
-            .Int => return "Int",
-            .Bool => return "Bool",
-            .Error => return "Error",
-            .Function => |fn_ty| {
+            .unit => return "Unit",
+            .int => return "Int",
+            .bool => return "Bool",
+            .err => return "Error",
+            .function => |fn_ty| {
                 const domain_name = self.formatTypeName(fn_ty.domain);
                 const codomain_name = self.formatTypeName(fn_ty.codomain);
                 return std.fmt.allocPrint(
@@ -158,7 +158,7 @@ pub const TypeStore = struct {
                     .{ domain_name, codomain_name },
                 ) catch "Function";
             },
-            .Product => |prod| {
+            .product => |prod| {
                 const left_name = self.formatTypeName(prod.left);
                 const right_name = self.formatTypeName(prod.right);
                 return std.fmt.allocPrint(
@@ -174,13 +174,13 @@ pub const TypeStore = struct {
 
 pub const Symbol = struct {
     name: []const u8,
-    typeId: TypeId,
+    type_id: TypeId,
     id: usize, // unique id for this symbol (e.g. variable id or function id)
     kind: enum {
         Variable,
         Function,
     },
     span: Span,
-    domainSpan: ?Span, // Only used for functions to indicate the parameter type annotation span
-    codomainSpan: ?Span, // Only used for functions to indicate the return type annotation span
+    domain_span: ?Span, // Only used for functions to indicate the parameter type annotation span
+    codomain_span: ?Span, // Only used for functions to indicate the return type annotation span
 };

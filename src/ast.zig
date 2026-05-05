@@ -8,13 +8,13 @@ pub const TypeExpr = struct {
 };
 
 pub const TypeExprKind = union(enum) {
-    Named: []const u8,
-    Unit,
-    Product: struct {
+    named: []const u8,
+    unit,
+    product: struct {
         left: *const TypeExpr,
         right: *const TypeExpr,
     },
-    Function: struct {
+    function: struct {
         domain: *const TypeExpr,
         codomain: *const TypeExpr,
     },
@@ -26,91 +26,89 @@ pub const Expr = struct {
 };
 
 pub const ExprKind = union(enum) {
-    IntLiteral: i64,
-    Identifier: []const u8,
-    BoolLiteral: bool,
-    UnitLiteral,
+    int_literal: i64,
+    identifier: []const u8,
+    bool_literal: bool,
+    unit_literal,
 
-    Unary: struct {
+    unary: struct {
         operator: UnaryOperator,
         right: *const Expr,
     },
 
-    Binary: struct {
+    binary: struct {
         left: *const Expr,
         operator: BinaryOperator,
         right: *const Expr,
     },
 
-    VariableDecl: struct {
+    variable_decl: struct {
         name: []const u8,
         value: *const Expr,
         type: ?*const TypeExpr,
     },
 
-    Block: struct {
+    block: struct {
         stmts: []const *Expr,
         tail: ?*const Expr,
     },
 
-    FunctionTypeSignature: struct {
+    func_type_signature: struct {
         name: []const u8,
-        // domain: *const Expr, // TODO: replace by a proper type expression
-        // codomain: *const Expr, // TODO: replace by a proper type expression
         ty: *const TypeExpr,
     },
 
-    FunctionDef: struct {
+    func_def: struct {
         name: []const u8,
         params: [][]const u8,
         body: *const Expr,
     },
 
-    FunctionCall: struct {
+    func_call: struct {
         callee: []const u8,
         args: []const *const Expr,
     },
 
-    If: struct {
+    @"if": struct {
         condition: *const Expr,
-        thenBranch: *const Expr,
-        elseBranch: ?*const Expr,
+        then_branch: *const Expr,
+        else_branch: ?*const Expr,
     },
 };
 
 pub const UnaryOperator = union(enum) {
-    Plus,
-    Minus,
-    Not,
+    plus,
+    minus,
+    not,
 };
 
 pub const BinaryOperator = union(enum) {
-    Plus,
-    Minus,
-    Divide,
-    Multiply,
-    TypeProduct,
-    Exponent,
+    plus,
+    minus,
+    divide,
+    multiply,
+    type_prod,
+    exponent,
 
-    Equal,
-    NotEqual,
-    LessThan,
-    GreaterThan,
-    LessThanOrEqual,
-    GreaterThanOrEqual,
+    equal,
+    not_equal,
+    less_than,
+    greater_than,
+    less_than_or_eq,
+    greater_than_or_eq,
 
-    LogicalOr,
-    LogicalAnd,
+    logical_or,
+    logical_and,
 };
 
 pub const Precedence = enum(u8) {
-    Lowest = 0,
-    Logical,
-    Equality,
-    Comparison,
-    Sum,
-    Product,
-    Exponent,
-    Prefix,
-    Group,
+    lowest = 0,
+    logical,
+    equality,
+    comparison,
+    sum,
+    product,
+    exponent,
+    prefix,
+    group,
 };

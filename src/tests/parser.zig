@@ -22,7 +22,7 @@ fn parse(arena: *std.heap.ArenaAllocator, source: []const u8) !*ast.Expr {
     // Allocate parser on heap or stack? Stack is fine here.
     var pars = parser.Parser.init(tokens, ctx_ptr);
     // Requires parseExpression to be 'pub'
-    return pars.parseExpression(.Lowest);
+    return pars.parseExpression(.lowest);
 }
 
 test "precedence: multiplication before addition" {
@@ -33,16 +33,16 @@ test "precedence: multiplication before addition" {
     const root = try parse(&arena, "1 + 2 * 3;");
 
     // Root should be Plus
-    try testing.expectEqual(ast.BinaryOperator.Plus, root.kind.Binary.operator);
+    try testing.expectEqual(ast.BinaryOperator.plus, root.kind.binary.operator);
 
     // Left should be 1
-    try testing.expectEqual(@as(i64, 1), root.kind.Binary.left.kind.IntLiteral);
+    try testing.expectEqual(@as(i64, 1), root.kind.binary.left.kind.int_literal);
 
     // Right should be (2 * 3)
-    const right = root.kind.Binary.right;
-    try testing.expectEqual(ast.BinaryOperator.Multiply, right.kind.Binary.operator);
-    try testing.expectEqual(@as(i64, 2), right.kind.Binary.left.kind.IntLiteral);
-    try testing.expectEqual(@as(i64, 3), right.kind.Binary.right.kind.IntLiteral);
+    const right = root.kind.binary.right;
+    try testing.expectEqual(ast.BinaryOperator.multiply, right.kind.binary.operator);
+    try testing.expectEqual(@as(i64, 2), right.kind.binary.left.kind.int_literal);
+    try testing.expectEqual(@as(i64, 3), right.kind.binary.right.kind.int_literal);
 }
 
 test "precedence: grouping overrides" {
@@ -53,16 +53,16 @@ test "precedence: grouping overrides" {
     const root = try parse(&arena, "(1 + 2) * 3");
 
     // Root should be Multiply
-    try testing.expectEqual(ast.BinaryOperator.Multiply, root.kind.Binary.operator);
+    try testing.expectEqual(ast.BinaryOperator.multiply, root.kind.binary.operator);
 
     // Left should be (1 + 2)
-    const left = root.kind.Binary.left;
-    try testing.expectEqual(ast.BinaryOperator.Plus, left.kind.Binary.operator);
-    try testing.expectEqual(@as(i64, 1), left.kind.Binary.left.kind.IntLiteral);
-    try testing.expectEqual(@as(i64, 2), left.kind.Binary.right.kind.IntLiteral);
+    const left = root.kind.binary.left;
+    try testing.expectEqual(ast.BinaryOperator.plus, left.kind.binary.operator);
+    try testing.expectEqual(@as(i64, 1), left.kind.binary.left.kind.int_literal);
+    try testing.expectEqual(@as(i64, 2), left.kind.binary.right.kind.int_literal);
 
     // Right should be 3
-    try testing.expectEqual(@as(i64, 3), root.kind.Binary.right.kind.IntLiteral);
+    try testing.expectEqual(@as(i64, 3), root.kind.binary.right.kind.int_literal);
 }
 
 test "associativity: right associative power" {
@@ -74,16 +74,16 @@ test "associativity: right associative power" {
     const root = try parse(&arena, "2 ^ 3 ^ 4");
 
     // Root is ^
-    try testing.expectEqual(ast.BinaryOperator.Exponent, root.kind.Binary.operator);
+    try testing.expectEqual(ast.BinaryOperator.exponent, root.kind.binary.operator);
 
     // Left is 2
-    try testing.expectEqual(@as(i64, 2), root.kind.Binary.left.kind.IntLiteral);
+    try testing.expectEqual(@as(i64, 2), root.kind.binary.left.kind.int_literal);
 
     // Right is (3 ^ 4)
-    const right = root.kind.Binary.right;
-    try testing.expectEqual(ast.BinaryOperator.Exponent, right.kind.Binary.operator);
-    try testing.expectEqual(@as(i64, 3), right.kind.Binary.left.kind.IntLiteral);
-    try testing.expectEqual(@as(i64, 4), right.kind.Binary.right.kind.IntLiteral);
+    const right = root.kind.binary.right;
+    try testing.expectEqual(ast.BinaryOperator.exponent, right.kind.binary.operator);
+    try testing.expectEqual(@as(i64, 3), right.kind.binary.left.kind.int_literal);
+    try testing.expectEqual(@as(i64, 4), right.kind.binary.right.kind.int_literal);
 }
 
 test "unary operators" {
@@ -93,15 +93,15 @@ test "unary operators" {
 
     const root = try parse(&arena, "-5 + !true");
 
-    try testing.expectEqual(ast.BinaryOperator.Plus, root.kind.Binary.operator);
+    try testing.expectEqual(ast.BinaryOperator.plus, root.kind.binary.operator);
 
     // Check Left: -5
-    const left = root.kind.Binary.left;
-    try testing.expectEqual(ast.UnaryOperator.Minus, left.kind.Unary.operator);
-    try testing.expectEqual(@as(i64, 5), left.kind.Unary.right.kind.IntLiteral);
+    const left = root.kind.binary.left;
+    try testing.expectEqual(ast.UnaryOperator.minus, left.kind.unary.operator);
+    try testing.expectEqual(@as(i64, 5), left.kind.unary.right.kind.int_literal);
 
     // Check Right: !true
-    const right = root.kind.Binary.right;
-    try testing.expectEqual(ast.UnaryOperator.Not, right.kind.Unary.operator);
-    try testing.expectEqual(true, right.kind.Unary.right.kind.BoolLiteral);
+    const right = root.kind.binary.right;
+    try testing.expectEqual(ast.UnaryOperator.not, right.kind.unary.operator);
+    try testing.expectEqual(true, right.kind.unary.right.kind.bool_literal);
 }

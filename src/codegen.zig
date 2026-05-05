@@ -12,10 +12,10 @@ pub const CodeGen = struct {
     ctx: *context.CompilerContext,
     target: targ.Target,
     output: std.ArrayList(u8) = .empty,
-    irGen: *const ir.IRGen,
-    varToStackOffset: std.StringHashMap(isize),
-    currentStackOffset: isize = -8,
-    currentFrameSize: usize = 0,
+    ir_gen: *const ir.IRGen,
+    var_to_stack_offset: std.StringHashMap(isize),
+    current_stack_offset: isize = -8,
+    current_frame_size: usize = 0,
     allocations: ?std.HashMap(
         liveness.LivenessKey,
         ra.Allocation,
@@ -23,34 +23,42 @@ pub const CodeGen = struct {
         std.hash_map.default_max_load_percentage,
     ) = null,
 
-    pub fn init(ctx: *context.CompilerContext, target: targ.Target, irGen: *const ir.IRGen) CodeGen {
+    pub fn init(
+        ctx: *context.CompilerContext,
+        target: targ.Target,
+        ir_gen: *const ir.IRGen,
+    ) CodeGen {
         return CodeGen{
             .ctx = ctx,
             .target = target,
-            .irGen = irGen,
-            .varToStackOffset = std.StringHashMap(isize).init(ctx.allocator), // it should probably be unmanaged
+            .ir_gen = ir_gen,
+            .var_to_stack_offset = std.StringHashMap(isize).init(ctx.allocator), // it should probably be unmanaged
         };
     }
 
     pub fn generate(self: *CodeGen) !void {
-        std.debug.print("Generating code for target: {f} {f}\n", .{ self.target.arch, self.target.os });
+        std.debug.print(
+            "Generating code for target: {f} {f}\n",
+            .{ self.target.arch, self.target.os },
+        );
         try self.emitHeader();
 
-        for (self.irGen.functions.items) |func| {
-            const liveIntervals = try liveness.analyze(&func, self.ctx.allocator);
+        for (self.ir_gen.functions.items) |func| {
+            const live_intervals = try liveness.analyze(&func, self.ctx.allocator);
             std.debug.print("Liveness info for function {s}:\n", .{func.name});
 
-            var regAlloc = try RegisterAllocator.init(liveIntervals, self.ctx.allocator);
+            var reg_alloc = try RegisterAllocator.init(live_intervals, self.ctx.allocator);
 
-            // FIXME: does not work for more than 8 params in the arm64 calling convention, but we can fix that later
+            // FIXME: does not work for more than 8 params in the arm64 calling convention,
+            // but we can fix that later
             for (func.params.items, 0..) |param, idx| {
-                const key = liveness.LivenessKey{ .Var = param.toString() };
-                const argReg = ra.ARGUMENT_REGISTERS[idx];
-                try regAlloc.allocations.put(key, .{ .Reg = argReg });
+                const key = liveness.LivenessKey{ .variable = param.toString() };
+                const arg_reg = ra.ARGUMENT_REGISTERS[idx];
+                try reg_alloc.allocations.put(key, .{ .reg = arg_reg });
 
-                for (regAlloc.availableRegisters.items, 0..) |reg, i| {
-                    if (reg.name == argReg.name) {
-                        _ = regAlloc.availableRegisters.orderedRemove(i);
+                for (reg_alloc.available_regs.items, 0..) |reg, i| {
+                    if (reg.name == arg_reg.name) {
+                        _ = reg_alloc.available_regs.orderedRemove(i);
                         break;
                     }
                 }
@@ -61,32 +69,32 @@ pub const CodeGen = struct {
                     ra.ARGUMENT_REGISTERS[idx].name.toString(),
                 });
 
-                for (liveIntervals) |interval| {
+                for (live_intervals) |interval| {
                     if (std.meta.eql(interval.key, key)) {
-                        try regAlloc.insertSortedByEndIntoActive(interval);
+                        try reg_alloc.insertSortedByEndIntoActive(interval);
                         break;
                     }
                 }
             }
 
-            const callSites = self.findCallSites(func);
+            const call_sites = self.findCallSites(func);
 
-            for (liveIntervals) |interval| {
+            for (live_intervals) |interval| {
                 // skip params, already pre-assigned
-                if (regAlloc.allocations.contains(interval.key)) continue;
+                if (reg_alloc.allocations.contains(interval.key)) continue;
 
-                for (callSites) |callPos| {
-                    if (interval.start <= callPos and callPos <= interval.end) {
+                for (call_sites) |call_pos| {
+                    if (interval.start <= call_pos and call_pos <= interval.end) {
                         // find next available callee-saved register
-                        for (regAlloc.availableRegisters.items, 0..) |reg, i| {
-                            if (reg.kind == .CalleeSaved) {
-                                try regAlloc.allocations.put(interval.key, .{ .Reg = reg });
-                                _ = regAlloc.availableRegisters.orderedRemove(i);
-                                try regAlloc.insertSortedByEndIntoActive(interval);
+                        for (reg_alloc.available_regs.items, 0..) |reg, i| {
+                            if (reg.kind == .callee_saved) {
+                                try reg_alloc.allocations.put(interval.key, .{ .reg = reg });
+                                _ = reg_alloc.available_regs.orderedRemove(i);
+                                try reg_alloc.insertSortedByEndIntoActive(interval);
                                 std.debug.print("******* pre-assigning {f} to callee-saved register {s} because of call at position {d}\n", .{
                                     interval,
                                     reg.name.toString(),
-                                    callPos,
+                                    call_pos,
                                 });
                                 break;
                             }
@@ -96,14 +104,14 @@ pub const CodeGen = struct {
                 }
             }
 
-            try regAlloc.allocate();
-            self.allocations = regAlloc.allocations;
-            const frameSize = std.mem.alignForward(usize, regAlloc.spill * 8 + 16, 16);
-            regAlloc.dumpLog();
+            try reg_alloc.allocate();
+            self.allocations = reg_alloc.allocations;
+            const frame_size = std.mem.alignForward(usize, reg_alloc.spill * 8 + 16, 16);
+            reg_alloc.dumpLog();
 
-            try self.emitFunction(func, frameSize);
+            try self.emitFunction(func, frame_size);
 
-            for (liveIntervals) |info| {
+            for (live_intervals) |info| {
                 std.debug.print("{f}\n", .{info});
             }
         }
@@ -120,28 +128,30 @@ pub const CodeGen = struct {
     }
 
     fn findCallSites(self: *CodeGen, func: ir.IRFunction) []usize {
-        var callSites: std.ArrayList(usize) = .empty;
+        var call_sites: std.ArrayList(usize) = .empty;
         var pos: usize = 0;
 
         for (func.blocks.items) |block| {
             for (block.instructions.items) |instr| {
                 switch (instr) {
-                    .Call => callSites.append(self.ctx.allocator, pos) catch @panic("failed to append call site"),
+                    .call => call_sites.append(self.ctx.allocator, pos) catch
+                        @panic("failed to append call site"),
                     else => {},
                 }
                 pos += 1;
             }
         }
-        return callSites.toOwnedSlice(self.ctx.allocator) catch @panic("failed to create call sites slice");
+        return call_sites.toOwnedSlice(self.ctx.allocator) catch
+            @panic("failed to create call sites slice");
     }
 
-    fn emitFunction(self: *CodeGen, func: ir.IRFunction, frameSize: usize) !void {
-        self.currentStackOffset = -8; // reset stack offset for each function
+    fn emitFunction(self: *CodeGen, func: ir.IRFunction, frame_size: usize) !void {
+        self.current_stack_offset = -8; // reset stack offset for each function
         // try self.emit("{s}:   ; param count: {d}\n", .{ func.name, func.params.items.len });
         try self.emit("{s}:\n", .{func.name});
 
-        self.currentFrameSize = frameSize;
-        try self.emitPrologue(self.currentFrameSize);
+        self.current_frame_size = frame_size;
+        try self.emitPrologue(self.current_frame_size);
 
         // FIXME: does not work for more than 8 params in the arm64 calling convention, but we can fix that later
         // for (func.params.items, 0..) |param, idx| {
@@ -168,28 +178,28 @@ pub const CodeGen = struct {
         try self.emit("\n", .{});
     }
 
-    fn emitBlock(self: *CodeGen, block: ir.BasicBlock, funcName: []const u8, isEntry: bool) !void {
-        if (!isEntry) try self.emit("block_{s}_{d}:\n", .{ funcName, block.id });
+    fn emitBlock(self: *CodeGen, block: ir.BasicBlock, func_name: []const u8, is_entry: bool) !void {
+        if (!is_entry) try self.emit("block_{s}_{d}:\n", .{ func_name, block.id });
         for (block.instructions.items) |instr| {
             try self.emitInstr(instr);
         }
 
         if (block.terminator) |term| {
-            try self.emitTerminator(term, funcName);
+            try self.emitTerminator(term, func_name);
         }
         try self.emit("\n", .{});
     }
 
     fn resolveRegister(self: *CodeGen, op: ir.Operand) []const u8 {
         const key: liveness.LivenessKey = switch (op.value) {
-            .Temp => |id| .{ .Temp = id },
-            .Variable => |name| .{ .Var = name },
+            .temp => |id| .{ .temp = id },
+            .variable => |name| .{ .variable = name },
             else => std.debug.panic("unsupported operand type for register resolution {f}", .{op}),
         };
         const alloc = self.allocations.?.get(key) orelse @panic("no allocation for operand");
         return switch (alloc) {
-            .Reg => |reg| reg.name.toString(),
-            .Spill => @panic("handle spills separately"),
+            .reg => |reg| reg.name.toString(),
+            .spil => @panic("handle spills separately"),
         };
     }
 
@@ -200,11 +210,14 @@ pub const CodeGen = struct {
 
         // TODO: abstract these to functions
         switch (instr) {
-            .Assign => |op| {
+            .assign => |op| {
                 const dst = self.resolveRegister(op.target);
                 switch (op.value.value) {
-                    .Int => |i| try self.emit("    mov {s}, #{d} ; {f} = {f}\n", .{ dst, i, op.target, op.value }),
-                    .Bool => |b| try self.emit("    mov {s}, #{d} ; {f} = {f}\n", .{
+                    .int => |i| try self.emit(
+                        "    mov {s}, #{d} ; {f} = {f}\n",
+                        .{ dst, i, op.target, op.value },
+                    ),
+                    .bool => |b| try self.emit("    mov {s}, #{d} ; {f} = {f}\n", .{
                         dst,
                         @intFromBool(b),
                         op.target,
@@ -218,14 +231,14 @@ pub const CodeGen = struct {
                     },
                 }
             },
-            .Add => |op| {
+            .add => |op| {
                 const dst = self.resolveRegister(op.result);
                 const left = self.resolveRegister(op.left);
                 switch (op.right.value) {
-                    .Int => |i| try self.emit("    add {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
+                    .int => |i| try self.emit("    add {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
                         dst, left, i, op.result, op.left, op.right,
                     }),
-                    .Variable, .Temp => {
+                    .variable, .temp => {
                         const right = self.resolveRegister(op.right);
                         try self.emit("    add {s}, {s}, {s} ; {f} = {f} + {f}\n", .{
                             dst, left, right, op.result, op.left, op.right,
@@ -234,14 +247,14 @@ pub const CodeGen = struct {
                     else => @panic("unsupported add operand"),
                 }
             },
-            .Sub => |op| {
+            .sub => |op| {
                 const dst = self.resolveRegister(op.result);
                 const left = self.resolveRegister(op.left);
                 switch (op.right.value) {
-                    .Int => |i| try self.emit("    sub {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
+                    .int => |i| try self.emit("    sub {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
                         dst, left, i, op.result, op.left, op.right,
                     }),
-                    .Variable, .Temp => {
+                    .variable, .temp => {
                         const right = self.resolveRegister(op.right);
                         try self.emit("    sub {s}, {s}, {s} ; {f} = {f} + {f}\n", .{
                             dst, left, right, op.result, op.left, op.right,
@@ -250,19 +263,19 @@ pub const CodeGen = struct {
                     else => @panic("unsupported add operand"),
                 }
             },
-            .Mul => |op| {
+            .mul => |op| {
                 const dst = self.resolveRegister(op.result);
                 const left = self.resolveRegister(op.left);
 
                 switch (op.right.value) {
-                    .Int => |i| {
+                    .int => |i| {
                         // mul has no immediate form, must use a scratch register
                         try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
                         try self.emit("    mul {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
                             dst, left, op.result, op.left, op.right,
                         });
                     },
-                    .Variable, .Temp => {
+                    .variable, .temp => {
                         const right = self.resolveRegister(op.right);
                         try self.emit("    mul {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
                             dst, left, right, op.result, op.left, op.right,
@@ -271,19 +284,19 @@ pub const CodeGen = struct {
                     else => @panic("unsupported mul operand"),
                 }
             },
-            .Div => |op| {
+            .div => |op| {
                 const dst = self.resolveRegister(op.result);
                 const left = self.resolveRegister(op.left);
 
                 switch (op.right.value) {
-                    .Int => |i| {
+                    .int => |i| {
                         // mul has no immediate form, must use a scratch register
                         try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
                         try self.emit("    sdiv {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
                             dst, left, op.result, op.left, op.right,
                         });
                     },
-                    .Variable, .Temp => {
+                    .variable, .temp => {
                         const right = self.resolveRegister(op.right);
                         try self.emit("    sdiv {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
                             dst, left, right, op.result, op.left, op.right,
@@ -292,8 +305,11 @@ pub const CodeGen = struct {
                     else => @panic("unsupported mul operand"),
                 }
             },
-            .Call => |op| {
-                try self.emit("    ; call {s}({d} args)[{f}]\n", .{ op.callee, op.args.len, op.result });
+            .call => |op| {
+                try self.emit(
+                    "    ; call {s}({d} args)[{f}]\n",
+                    .{ op.callee, op.args.len, op.result },
+                );
                 for (op.args, 0..) |arg, idx| {
                     const reg = std.fmt.allocPrint(self.ctx.allocator, "x{d}", .{idx}) catch unreachable;
                     try self.loadOperand(arg, reg, "arg {d}: {f}", .{ idx, arg });
@@ -301,12 +317,12 @@ pub const CodeGen = struct {
                 try self.emit("    bl {s}\n", .{op.callee});
                 try self.storeVariable(op.result, "x0");
             },
-            .Eq => |op| try self.emitCondition(op.result, op.left, op.right, "eq"),
-            .Neq => |op| try self.emitCondition(op.result, op.left, op.right, "ne"),
-            .Lt => |op| try self.emitCondition(op.result, op.left, op.right, "lt"),
-            .LtEq => |op| try self.emitCondition(op.result, op.left, op.right, "le"),
-            .Gt => |op| try self.emitCondition(op.result, op.left, op.right, "gt"),
-            .GtEq => |op| try self.emitCondition(op.result, op.left, op.right, "ge"),
+            .eq => |op| try self.emitCondition(op.result, op.left, op.right, "eq"),
+            .neq => |op| try self.emitCondition(op.result, op.left, op.right, "ne"),
+            .lt => |op| try self.emitCondition(op.result, op.left, op.right, "lt"),
+            .lt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "le"),
+            .gt => |op| try self.emitCondition(op.result, op.left, op.right, "gt"),
+            .gt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "ge"),
 
             else => @panic("Unsupported instruction type"),
         }
@@ -317,20 +333,20 @@ pub const CodeGen = struct {
         result: ir.Operand,
         left: ir.Operand,
         right: ir.Operand,
-        cmpInstr: []const u8,
+        cmp_instr: []const u8,
     ) !void {
-        try self.emit("    ; {f} = {f} {s} {f}\n", .{ result, left, cmpInstr, right });
+        try self.emit("    ; {f} = {f} {s} {f}\n", .{ result, left, cmp_instr, right });
         try self.loadOperand(left, "x0", null, .{});
         try self.loadOperand(right, "x1", null, .{});
         try self.emit("    cmp x0, x1\n", .{});
-        try self.emit("    cset x0, {s}\n", .{cmpInstr});
+        try self.emit("    cset x0, {s}\n", .{cmp_instr});
         try self.storeVariable(result, "x0");
     }
 
     fn resolveOperand(self: *CodeGen, operand: ir.Operand) ra.Allocation {
         const key: liveness.LivenessKey = switch (operand.value) {
-            .Variable => |name| liveness.LivenessKey{ .Var = name },
-            .Temp => |id| liveness.LivenessKey{ .Temp = id },
+            .variable => |name| liveness.LivenessKey{ .variable = name },
+            .temp => |id| liveness.LivenessKey{ .temp = id },
             else => @panic("Unsupported operand type for register allocation"),
         };
 
@@ -340,36 +356,36 @@ pub const CodeGen = struct {
     fn loadOperand(
         self: *CodeGen,
         operand: ir.Operand,
-        destReg: []const u8,
-        comptime commentFmt: ?[]const u8,
-        commentArgs: anytype,
+        dest_reg: []const u8,
+        comptime comment_fmt: ?[]const u8,
+        comment_args: anytype,
     ) !void {
         switch (operand.value) {
-            .Int => |i| {
-                try self.emit("    mov {s}, #{d}", .{ destReg, i });
-                if (commentFmt) |fmt| try self.emit(" ; " ++ fmt, commentArgs);
+            .int => |i| {
+                try self.emit("    mov {s}, #{d}", .{ dest_reg, i });
+                if (comment_fmt) |fmt| try self.emit(" ; " ++ fmt, comment_args);
                 try self.emit("\n", .{});
             },
-            .Bool => |b| {
-                try self.emit("    mov {s}, #{d}", .{ destReg, @intFromBool(b) });
-                if (commentFmt) |fmt| try self.emit(" ; " ++ fmt, commentArgs);
+            .bool => |b| {
+                try self.emit("    mov {s}, #{d}", .{ dest_reg, @intFromBool(b) });
+                if (comment_fmt) |fmt| try self.emit(" ; " ++ fmt, comment_args);
                 try self.emit("\n", .{});
             },
-            .Variable, .Temp => {
+            .variable, .temp => {
                 // const offset = self.varToStackOffset.get(name) orelse unreachable;
                 // try self.emit("    ldr {s}, [x29, #{d}] ; load {s}\n", .{ reg, offset, name });
                 switch (self.resolveOperand(operand)) {
-                    .Reg => |reg| {
-                        if (!std.mem.eql(u8, reg.name.toString(), destReg)) {
-                            try self.emit("    mov {s}, {s}", .{ destReg, reg.name.toString() });
-                            if (commentFmt) |fmt| try self.emit(" ; " ++ fmt, commentArgs);
+                    .reg => |reg| {
+                        if (!std.mem.eql(u8, reg.name.toString(), dest_reg)) {
+                            try self.emit("    mov {s}, {s}", .{ dest_reg, reg.name.toString() });
+                            if (comment_fmt) |fmt| try self.emit(" ; " ++ fmt, comment_args);
                             try self.emit("\n", .{});
                         }
                     },
-                    .Spill => |slot| {
+                    .spil => |slot| {
                         const offset = CodeGen.spillSlotOffset(slot);
                         try self.emit("    ldr {s}, [x29, #-{d}] ; load spilled value\n", .{
-                            destReg,
+                            dest_reg,
                             offset,
                         });
                     },
@@ -387,29 +403,29 @@ pub const CodeGen = struct {
         return (slot + 1) * 8;
     }
 
-    fn emitTerminator(self: *CodeGen, term: ir.Terminator, funcName: []const u8) !void {
+    fn emitTerminator(self: *CodeGen, term: ir.Terminator, func_name: []const u8) !void {
         switch (term) {
-            .Exit => |op| {
+            .exit => |op| {
                 try self.emit("\n    ; exit {f}\n", .{op});
                 switch (op.value) {
-                    .Int => |code| try self.emit("    mov x0, #{d}\n", .{code}),
-                    .Variable, .Temp => try self.loadOperand(op, "x0", null, .{}),
+                    .int => |code| try self.emit("    mov x0, #{d}\n", .{code}),
+                    .variable, .temp => try self.loadOperand(op, "x0", null, .{}),
                     else => @panic("unsupported exit operand"),
                 }
                 try self.emit("    mov x16, #1\n    svc #0x80\n", .{});
             },
-            .Return => |op| {
+            .@"return" => |op| {
                 // try self.emit("    ; return {f}\n", .{op});
                 try self.loadOperand(op, "x0", "return {f}", .{op});
-                try self.emitEpilogue(self.currentFrameSize);
+                try self.emitEpilogue(self.current_frame_size);
                 try self.emit("    ret\n", .{});
             },
-            .Jump => |target| try self.emit("    b block_{s}_{d}\n", .{ funcName, target }),
-            .ConditionalJump => |cj| {
+            .jump => |target| try self.emit("    b block_{s}_{d}\n", .{ func_name, target }),
+            .cond_jump => |cj| {
                 try self.loadOperand(cj.condition, "x0", null, .{});
                 try self.emit("    cmp x0, #1\n", .{});
-                try self.emit("    b.eq block_{s}_{d}\n", .{ funcName, cj.trueTarget });
-                try self.emit("    b block_{s}_{d}\n", .{ funcName, cj.falseTarget });
+                try self.emit("    b.eq block_{s}_{d}\n", .{ func_name, cj.true_target });
+                try self.emit("    b block_{s}_{d}\n", .{ func_name, cj.false_target });
             },
             // else => @panic("Unsupported terminator type"),
         }
@@ -420,20 +436,20 @@ pub const CodeGen = struct {
         std.debug.print(fmt, args); // for debugging
     }
 
-    fn emitPrologue(self: *CodeGen, frameSize: usize) !void {
+    fn emitPrologue(self: *CodeGen, frame_size: usize) !void {
         // try self.emit("    ; prologue\n", .{});
-        try self.emit("    ; frame size: {d}\n", .{frameSize});
-        try self.emit("    sub sp, sp, #{d}\n", .{frameSize});
+        try self.emit("    ; frame size: {d}\n", .{frame_size});
+        try self.emit("    sub sp, sp, #{d}\n", .{frame_size});
 
-        try self.emit("    stp x29, x30, [sp, #{d}]\n", .{frameSize - 16});
+        try self.emit("    stp x29, x30, [sp, #{d}]\n", .{frame_size - 16});
 
-        try self.emit("    add x29, sp, #{d}\n\n", .{frameSize - 16});
+        try self.emit("    add x29, sp, #{d}\n\n", .{frame_size - 16});
     }
 
-    fn emitEpilogue(self: *CodeGen, frameSize: usize) !void {
+    fn emitEpilogue(self: *CodeGen, frame_size: usize) !void {
         try self.emit("\n    ; epilogue\n", .{});
-        try self.emit("    ldp x29, x30, [sp, #{d}]\n", .{frameSize - 16});
-        try self.emit("    add sp, sp, #{d}\n", .{frameSize});
+        try self.emit("    ldp x29, x30, [sp, #{d}]\n", .{frame_size - 16});
+        try self.emit("    add sp, sp, #{d}\n", .{frame_size});
     }
 
     fn emitHeader(self: *CodeGen) !void {
@@ -441,7 +457,7 @@ pub const CodeGen = struct {
         try self.emit(".align 2\n\n", .{});
     }
 
-    fn storeVariable(self: *CodeGen, result: ir.Operand, srcReg: []const u8) !void {
+    fn storeVariable(self: *CodeGen, result: ir.Operand, src_reg: []const u8) !void {
         // if the variable is already on the stack, reuse its slot
         // if (self.varToStackOffset.get(name)) |offset| {
         //     try self.emit("    str {s}, [x29, #{d}] ; store {s}\n", .{ srcReg, offset, name });
@@ -451,14 +467,17 @@ pub const CodeGen = struct {
         // try self.varToStackOffset.put(name, self.currentStackOffset);
         // self.currentStackOffset -= 8;
         switch (self.resolveOperand(result)) {
-            .Reg => |reg| {
-                if (!std.mem.eql(u8, reg.name.toString(), srcReg)) {
-                    try self.emit("    mov {s}, {s}\n", .{ reg.name.toString(), srcReg });
+            .reg => |reg| {
+                if (!std.mem.eql(u8, reg.name.toString(), src_reg)) {
+                    try self.emit("    mov {s}, {s}\n", .{ reg.name.toString(), src_reg });
                 }
             },
-            .Spill => |slot| {
+            .spil => |slot| {
                 const offset = CodeGen.spillSlotOffset(slot);
-                try self.emit("    str {s}, [x29, #-{d}] ; store spilled value\n", .{ srcReg, offset });
+                try self.emit(
+                    "    str {s}, [x29, #-{d}] ; store spilled value\n",
+                    .{ src_reg, offset },
+                );
             },
         }
     }

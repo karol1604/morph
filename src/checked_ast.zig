@@ -4,75 +4,75 @@ const TypeId = @import("type_store.zig").TypeId;
 const Span = @import("span.zig").Span;
 
 pub const CheckedTypeExpr = struct {
-    typeId: TypeId,
+    type_id: TypeId,
     span: Span,
 };
 
 pub const CheckedExpr = struct {
-    typeId: TypeId,
+    type_id: TypeId,
     kind: CheckedExprKind,
     span: Span,
 };
 
 pub const Param = struct {
     name: []const u8,
-    typeId: TypeId,
+    type_id: TypeId,
     id: usize, // unique id for this parameter
 };
 
 pub const CheckedExprKind = union(enum) {
-    IntLiteral: i64,
-    BoolLiteral: bool,
-    UnitLiteral,
-    Identifier: struct {
+    int_literal: i64,
+    bool_literal: bool,
+    unit_literal,
+    identifier: struct {
         name: []const u8,
         id: usize, // unique id for this variable
     },
 
-    Unary: struct {
+    unary: struct {
         operator: ast.UnaryOperator,
         right: *const CheckedExpr,
     },
 
-    Binary: struct {
+    binary: struct {
         left: *const CheckedExpr,
         operator: ast.BinaryOperator,
         right: *const CheckedExpr,
     },
 
-    VariableDecl: struct {
+    variable_decl: struct {
         name: []const u8,
         value: *const CheckedExpr,
         id: usize, // unique id for this variable
     },
 
-    Block: struct {
+    block: struct {
         stmts: []const *CheckedExpr,
         tail: ?*const CheckedExpr,
     },
 
-    FunctionTypeSignature: struct {
+    func_type_signature: struct {
         name: []const u8,
         domain: CheckedTypeExpr,
         codomain: CheckedTypeExpr,
     },
 
-    FunctionDecl: struct {
+    func_decl: struct {
         name: []const u8,
         body: *const CheckedExpr,
         params: []const Param,
         id: usize, // unique id for this function
     },
 
-    FunctionCall: struct {
+    func_call: struct {
         callee: []const u8,
         args: []const *const CheckedExpr,
         id: usize, // unique id for this function call
     },
 
-    If: struct {
+    @"if": struct {
         condition: *const CheckedExpr,
-        thenBranch: *const CheckedExpr,
-        elseBranch: ?*const CheckedExpr,
+        then_branch: *const CheckedExpr,
+        else_branch: ?*const CheckedExpr,
     },
 };

@@ -16,7 +16,12 @@ const utils = @import("utils.zig");
 
 fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
     for (ctx.diagnostics.items) |diag| {
-        try zspan.displayDiagnostic(diag, &[_]zspan.SourceFile{ctx.sourceFile}, writer, ctx.allocator);
+        try zspan.displayDiagnostic(
+            diag,
+            &[_]zspan.SourceFile{ctx.source_file},
+            writer,
+            ctx.allocator,
+        );
     }
 }
 
@@ -60,7 +65,9 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var check = try checker.Checker.init(&ctx, exprs);
-    const checkedExprs = try check.check();
+    const checked_exprs = try check.check();
+
+    ctx.attachTypeStore(&check.type_store);
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
@@ -73,30 +80,30 @@ pub fn main(init: std.process.Init) !void {
         return error.CompilationFailed;
     }
 
-    for (checkedExprs) |expr| {
+    for (checked_exprs) |expr| {
         std.debug.print("- ", .{});
         utils.prettyPrintCheckedExpression(&expr.*);
     }
 
-    var irGen = ir.IRGen.init(&ctx);
-    try irGen.generate(checkedExprs);
+    var ir_gen = ir.IRGen.init(&ctx);
+    try ir_gen.generate(checked_exprs);
 
     std.debug.print("************\n", .{});
-    std.debug.print("Type Store:\n{f}", .{check.typeStore});
+    std.debug.print("Type Store:\n{f}", .{check.type_store});
     std.debug.print("************\n", .{});
     std.debug.print("Checked Expression(s):\n", .{});
 
-    irGen.dump();
+    ir_gen.dump();
 
     const target = targ.Target.current();
     std.debug.print("Current target: {f} {f}\n", .{ target.arch, target.os });
-    var codeGen = codegen.CodeGen.init(&ctx, target, &irGen);
-    try codeGen.generate();
+    var code_gen = codegen.CodeGen.init(&ctx, target, &ir_gen);
+    try code_gen.generate();
 
-    const asmPath = "/Users/karol/projects/morph/tmp/out.s";
-    const binPath = "/Users/karol/projects/morph/tmp/out";
-    try codeGen.writeToFile(asmPath, io);
-    try assembleAndLink(io, arena.allocator(), asmPath, binPath);
+    const asm_path = "/Users/karol/projects/morph/tmp/out.s";
+    const bin_path = "/Users/karol/projects/morph/tmp/out";
+    try code_gen.writeToFile(asm_path, io);
+    try assembleAndLink(io, arena.allocator(), asm_path, bin_path);
 
     // std.debug.print("Generated IR({d}):\n", .{instructions.len});
     // for (instructions) |instr| {
@@ -115,34 +122,34 @@ fn assembleAndLink(
     outPath: []const u8,
 ) !void {
     // assemble
-    const objPath = "/tmp/out.o";
-    const asResult = try std.process.run(allocator, io, .{
-        .argv = &.{ "as", "-g", "-o", objPath, asmPath },
+    const obj_path = "/tmp/out.o";
+    const as_result = try std.process.run(allocator, io, .{
+        .argv = &.{ "as", "-g", "-o", obj_path, asmPath },
     });
-    if (asResult.term.exited != 0) {
-        std.debug.print("Assembler error:\n{s}\n", .{asResult.stderr});
+    if (as_result.term.exited != 0) {
+        std.debug.print("Assembler error:\n{s}\n", .{as_result.stderr});
         return error.AssemblerFailed;
     }
 
     // link
-    const sdkPath = try getSdkPath(io, allocator);
-    const ldResult = try std.process.run(allocator, io, .{
+    const sdk_path = try getSdkPath(io, allocator);
+    const ld_res = try std.process.run(allocator, io, .{
         .argv = &.{
             "ld",
             "-o",
             outPath,
-            objPath,
+            obj_path,
             "-lSystem",
             "-syslibroot",
-            sdkPath,
+            sdk_path,
             "-e",
             "_main",
             "-arch",
             "arm64",
         },
     });
-    if (ldResult.term.exited != 0) {
-        std.debug.print("Linker error:\n{s}\n", .{ldResult.stderr});
+    if (ld_res.term.exited != 0) {
+        std.debug.print("Linker error:\n{s}\n", .{ld_res.stderr});
         return error.LinkerFailed;
     }
 

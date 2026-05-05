@@ -51,13 +51,13 @@ fn prettyPrintRecType(
     }
 
     switch (expr) {
-        .Named => |name| {
+        .named => |name| {
             std.debug.print("Named: {s}\n", .{name});
         },
-        .Unit => {
+        .unit => {
             std.debug.print("Unit\n", .{});
         },
-        .Product => |prod| {
+        .product => |prod| {
             std.debug.print("Product\n", .{});
 
             treeLines[depth] = !isLast;
@@ -65,7 +65,7 @@ fn prettyPrintRecType(
             prettyPrintRecType(prod.left.*.kind, depth + 1, treeLines, false);
             prettyPrintRecType(prod.right.*.kind, depth + 1, treeLines, true);
         },
-        .Function => |func| {
+        .function => |func| {
             std.debug.print("Function\n", .{});
 
             treeLines[depth] = !isLast;
@@ -99,23 +99,23 @@ fn prettyPrintRec(
 
     // 3) Print this node
     switch (expr) {
-        .IntLiteral => |val| {
+        .int_literal => |val| {
             std.debug.print("IntLiteral {d}\n", .{val});
         },
-        .Identifier => |name| {
+        .identifier => |name| {
             std.debug.print("Identifier {s}\n", .{name});
         },
-        .BoolLiteral => |val| {
+        .bool_literal => |val| {
             std.debug.print("BoolLiteral {s}\n", .{if (val) "true" else "false"});
         },
-        .UnitLiteral => {
+        .unit_literal => {
             std.debug.print("UnitLiteral\n", .{});
         },
-        .Unary => |u| {
+        .unary => |u| {
             const opStr = switch (u.operator) {
-                .Plus => "+",
-                .Minus => "-",
-                .Not => "!",
+                .plus => "+",
+                .minus => "-",
+                .not => "!",
             };
             std.debug.print("Unary {s}\n", .{opStr});
 
@@ -125,7 +125,7 @@ fn prettyPrintRec(
             // recurse on the single child (always the last one)
             prettyPrintRec(u.right.*.kind, depth + 1, treeLines, true);
         },
-        .VariableDecl => |varDecl| {
+        .variable_decl => |varDecl| {
             if (varDecl.type) |ty| {
                 _ = ty;
                 // TODO: fix this
@@ -138,22 +138,22 @@ fn prettyPrintRec(
             treeLines[depth] = !isLast;
             prettyPrintRec(varDecl.value.*.kind, depth + 1, treeLines, true);
         },
-        .Binary => |b| {
+        .binary => |b| {
             const opStr = switch (b.operator) {
-                .Plus => "+",
-                .Minus => "-",
-                .Multiply => "*",
-                .TypeProduct => "×",
-                .Divide => "/",
-                .Exponent => "^",
-                .Equal => "==",
-                .NotEqual => "!=",
-                .LessThan => "<",
-                .GreaterThan => ">",
-                .LessThanOrEqual => "<=",
-                .GreaterThanOrEqual => ">=",
-                .LogicalAnd => "and",
-                .LogicalOr => "or",
+                .plus => "+",
+                .minus => "-",
+                .multiply => "*",
+                .type_prod => "×",
+                .divide => "/",
+                .exponent => "^",
+                .equal => "==",
+                .not_equal => "!=",
+                .less_than => "<",
+                .greater_than => ">",
+                .less_than_or_eq => "<=",
+                .greater_than_or_eq => ">=",
+                .logical_and => "and",
+                .logical_or => "or",
             };
             std.debug.print("Binary {s}\n", .{opStr});
 
@@ -163,7 +163,7 @@ fn prettyPrintRec(
             // right is last
             prettyPrintRec(b.right.*.kind, depth + 1, treeLines, true);
         },
-        .Block => |blk| {
+        .block => |blk| {
             std.debug.print("Block\n", .{});
 
             treeLines[depth] = !isLast;
@@ -181,17 +181,17 @@ fn prettyPrintRec(
                 prettyPrintRec(t.kind, depth + 1, treeLines, true);
             }
         },
-        .FunctionTypeSignature => |sig| {
+        .func_type_signature => |sig| {
             std.debug.print("FunctionTypeSignature: {s}\n", .{sig.name});
 
             treeLines[depth] = !isLast;
 
-            const func = sig.ty.kind.Function;
+            const func = sig.ty.kind.function;
             prettyPrintRecType(func.domain.kind, depth + 1, treeLines, false);
 
             prettyPrintRecType(func.codomain.kind, depth + 1, treeLines, true);
         },
-        .FunctionDef => |def| {
+        .func_def => |def| {
             std.debug.print("FunctionDef: {s}\n", .{def.name});
 
             treeLines[depth] = !isLast;
@@ -199,7 +199,7 @@ fn prettyPrintRec(
             // Child 1: Body - Last
             prettyPrintRec(def.body.*.kind, depth + 1, treeLines, true);
         },
-        .FunctionCall => |call| {
+        .func_call => |call| {
             std.debug.print("FunctionCall: {s}\n", .{call.callee});
 
             treeLines[depth] = !isLast;
@@ -210,17 +210,17 @@ fn prettyPrintRec(
                 prettyPrintRec(arg.kind, depth + 1, treeLines, is_last_child);
             }
         },
-        .If => |ifExpr| {
-            const isElseBranch = if (ifExpr.elseBranch) |_| true else false;
+        .@"if" => |ifExpr| {
+            const isElseBranch = if (ifExpr.else_branch) |_| true else false;
             std.debug.print("If\n", .{});
 
             treeLines[depth] = !isLast;
 
             prettyPrintRec(ifExpr.condition.*.kind, depth + 1, treeLines, false);
 
-            prettyPrintRec(ifExpr.thenBranch.*.kind, depth + 1, treeLines, !isElseBranch);
+            prettyPrintRec(ifExpr.then_branch.*.kind, depth + 1, treeLines, !isElseBranch);
 
-            if (ifExpr.elseBranch) |elseBranch| {
+            if (ifExpr.else_branch) |elseBranch| {
                 prettyPrintRec(elseBranch.*.kind, depth + 1, treeLines, true);
             }
         },
@@ -256,25 +256,25 @@ fn prettyPrintRecCheck(
 
     // 3) Print this node
     switch (expr.kind) {
-        .IntLiteral => |val| {
-            std.debug.print("IntLiteral {d} (typeId: {d})\n", .{ val, expr.typeId });
+        .int_literal => |val| {
+            std.debug.print("IntLiteral {d} (typeId: {d})\n", .{ val, expr.type_id });
         },
-        .Identifier => |name| {
-            std.debug.print("Identifier {s} (typeId: {d})\n", .{ name.name, expr.typeId });
+        .identifier => |name| {
+            std.debug.print("Identifier {s} (typeId: {d})\n", .{ name.name, expr.type_id });
         },
-        .BoolLiteral => |val| {
-            std.debug.print("BoolLiteral {s} (typeId: {d})\n", .{ if (val) "true" else "false", expr.typeId });
+        .bool_literal => |val| {
+            std.debug.print("BoolLiteral {s} (typeId: {d})\n", .{ if (val) "true" else "false", expr.type_id });
         },
-        .UnitLiteral => {
-            std.debug.print("UnitLiteral (typeId: {d})\n", .{expr.typeId});
+        .unit_literal => {
+            std.debug.print("UnitLiteral (typeId: {d})\n", .{expr.type_id});
         },
-        .Unary => |u| {
+        .unary => |u| {
             const opStr = switch (u.operator) {
-                .Plus => "+",
-                .Minus => "-",
-                .Not => "!",
+                .plus => "+",
+                .minus => "-",
+                .not => "!",
             };
-            std.debug.print("Unary {s} (typeId: {d})\n", .{ opStr, expr.typeId });
+            std.debug.print("Unary {s} (typeId: {d})\n", .{ opStr, expr.type_id });
 
             // mark at this depth whether we should draw a
             // vertical bar for deeper siblings
@@ -282,30 +282,30 @@ fn prettyPrintRecCheck(
             // recurse on the single child (always the last one)
             prettyPrintRecCheck(u.right, depth + 1, treeLines, true);
         },
-        .VariableDecl => |varDecl| {
-            std.debug.print("VariableDecl {s} = (typeId: {d})\n", .{ varDecl.name, expr.typeId });
+        .variable_decl => |varDecl| {
+            std.debug.print("VariableDecl {s} = (typeId: {d})\n", .{ varDecl.name, expr.type_id });
 
             treeLines[depth] = !isLast;
             prettyPrintRecCheck(varDecl.value, depth + 1, treeLines, true);
         },
-        .Binary => |b| {
+        .binary => |b| {
             const opStr = switch (b.operator) {
-                .Plus => "+",
-                .Minus => "-",
-                .Multiply => "*",
-                .TypeProduct => "×",
-                .Divide => "/",
-                .Exponent => "^",
-                .Equal => "==",
-                .NotEqual => "!=",
-                .LessThan => "<",
-                .GreaterThan => ">",
-                .LessThanOrEqual => "<=",
-                .GreaterThanOrEqual => ">=",
-                .LogicalAnd => "and",
-                .LogicalOr => "or",
+                .plus => "+",
+                .minus => "-",
+                .multiply => "*",
+                .type_prod => "×",
+                .divide => "/",
+                .exponent => "^",
+                .equal => "==",
+                .not_equal => "!=",
+                .less_than => "<",
+                .greater_than => ">",
+                .less_than_or_eq => "<=",
+                .greater_than_or_eq => ">=",
+                .logical_and => "and",
+                .logical_or => "or",
             };
-            std.debug.print("Binary {s} (typeId: {d})\n", .{ opStr, expr.typeId });
+            std.debug.print("Binary {s} (typeId: {d})\n", .{ opStr, expr.type_id });
 
             treeLines[depth] = !isLast;
             // left is not last
@@ -313,8 +313,8 @@ fn prettyPrintRecCheck(
             // right is last
             prettyPrintRecCheck(b.right, depth + 1, treeLines, true);
         },
-        .Block => |blk| {
-            std.debug.print("Block (typeId: {d})\n", .{expr.typeId});
+        .block => |blk| {
+            std.debug.print("Block (typeId: {d})\n", .{expr.type_id});
 
             treeLines[depth] = !isLast;
 
@@ -331,12 +331,12 @@ fn prettyPrintRecCheck(
                 prettyPrintRecCheck(t, depth + 1, treeLines, true);
             }
         },
-        .FunctionTypeSignature => |sig| {
+        .func_type_signature => |sig| {
             std.debug.print("TypeSignature: {s} :: {d} -> {d} (typeId: {d})\n", .{
                 sig.name,
-                sig.domain.typeId,
-                sig.codomain.typeId,
-                expr.typeId,
+                sig.domain.type_id,
+                sig.codomain.type_id,
+                expr.type_id,
             });
 
             treeLines[depth] = !isLast;
@@ -347,15 +347,15 @@ fn prettyPrintRecCheck(
             // // Child 2: Codomain (Output) - Last
             // prettyPrintRecCheck(sig.codomain, depth + 1, treeLines, true);
         },
-        .FunctionDecl => |def| {
-            std.debug.print("FunctionDecl: {s} (typeId: {d})\n", .{ def.name, expr.typeId });
+        .func_decl => |def| {
+            std.debug.print("FunctionDecl: {s} (typeId: {d})\n", .{ def.name, expr.type_id });
 
             treeLines[depth] = !isLast;
 
             prettyPrintRecCheck(def.body, depth + 1, treeLines, true);
         },
-        .FunctionCall => |call| {
-            std.debug.print("FunctionCall: {s} (typeId: {d})\n", .{ call.callee, expr.typeId });
+        .func_call => |call| {
+            std.debug.print("FunctionCall: {s} (typeId: {d})\n", .{ call.callee, expr.type_id });
 
             treeLines[depth] = !isLast;
 
@@ -365,18 +365,18 @@ fn prettyPrintRecCheck(
                 prettyPrintRecCheck(arg, depth + 1, treeLines, is_last_child);
             }
         },
-        .If => |ifExpr| {
-            const isElseBranch = if (ifExpr.elseBranch) |_| true else false;
+        .@"if" => |ifExpr| {
+            const isElseBranch = if (ifExpr.else_branch) |_| true else false;
 
-            std.debug.print("If (typeId: {d})\n", .{expr.typeId});
+            std.debug.print("If (typeId: {d})\n", .{expr.type_id});
 
             treeLines[depth] = !isLast;
 
             prettyPrintRecCheck(ifExpr.condition, depth + 1, treeLines, false);
 
-            prettyPrintRecCheck(ifExpr.thenBranch, depth + 1, treeLines, !isElseBranch);
+            prettyPrintRecCheck(ifExpr.then_branch, depth + 1, treeLines, !isElseBranch);
 
-            if (ifExpr.elseBranch) |elseBranch| {
+            if (ifExpr.else_branch) |elseBranch| {
                 prettyPrintRecCheck(elseBranch, depth + 1, treeLines, true);
             }
         },

@@ -12,35 +12,35 @@ const Keywords = token.Keywords;
 
 pub const Lexer = struct {
     ctx: *context.CompilerContext,
-    currentPos: usize = 0, // offset
+    current_pos: usize = 0, // offset
     line: usize = 1,
     col: usize = 1,
-    utf8Iter: std.unicode.Utf8Iterator,
+    utf8_iter: std.unicode.Utf8Iterator,
 
     pub fn init(ctx: *context.CompilerContext) !Lexer {
         return Lexer{
             .ctx = ctx,
-            .utf8Iter = (try std.unicode.Utf8View.init(ctx.source)).iterator(),
+            .utf8_iter = (try std.unicode.Utf8View.init(ctx.source)).iterator(),
         };
     }
 
     fn isAtEnd(self: *const Lexer) bool {
-        return self.currentPos >= self.ctx.source.len;
+        return self.current_pos >= self.ctx.source.len;
     }
 
     fn currentLocation(self: *const Lexer) span.Location {
         return Location{
             .line = self.line,
             .col = self.col,
-            .offset = self.currentPos,
+            .offset = self.current_pos,
         };
     }
 
     fn advance(self: *Lexer) !u21 {
-        const c = self.utf8Iter.nextCodepoint() orelse 0;
+        const c = self.utf8_iter.nextCodepoint() orelse 0;
 
-        const byteLen: usize = @intCast(try std.unicode.utf8CodepointSequenceLength(c));
-        self.currentPos += byteLen;
+        const byte_len: usize = @intCast(try std.unicode.utf8CodepointSequenceLength(c));
+        self.current_pos += byte_len;
 
         if (c == '\n') {
             self.line += 1;
@@ -52,125 +52,151 @@ pub const Lexer = struct {
     }
 
     fn peek(self: *const Lexer) u21 {
-        var it = self.utf8Iter;
+        var it = self.utf8_iter;
         return it.nextCodepoint() orelse 0;
     }
 
     fn match(self: *Lexer, expected: u21) !bool {
-        if (self.isAtEnd() or self.ctx.source[self.currentPos] != expected) return false;
+        if (self.isAtEnd() or self.ctx.source[self.current_pos] != expected) return false;
 
         _ = try self.advance();
         return true;
     }
 
-    fn makeNumberToken(self: *Lexer, startLoc: Location) !Token {
+    fn makeNumberToken(self: *Lexer, start_loc: Location) !Token {
         while (utils.isDigit(self.peek())) {
             _ = try self.advance();
         }
-        const endLocation = self.currentLocation();
+        const end_location = self.currentLocation();
 
-        const tokSpan = Span{
-            .start = startLoc,
-            .end = endLocation,
+        const tok_span = Span{
+            .start = start_loc,
+            .end = end_location,
         };
-        const i = try std.fmt.parseInt(i64, self.ctx.source[tokSpan.start.offset..tokSpan.end.offset], 10);
-        return Token{ .kind = .{ .IntLiteral = i }, .span = tokSpan };
+        const i = try std.fmt.parseInt(i64, self.ctx.source[tok_span.start.offset..tok_span.end.offset], 10);
+        return Token{ .kind = .{ .int_literal = i }, .span = tok_span };
     }
 
-    fn makeIdentifierToken(self: *Lexer, startLoc: Location) !Token {
+    fn makeIdentifierToken(self: *Lexer, start_loc: Location) !Token {
         while (utils.isAlphaNumeric(self.peek())) {
             _ = try self.advance();
         }
-        const endLocation = self.currentLocation();
+        const end_location = self.currentLocation();
 
-        const tokSpan = Span{
-            .start = startLoc,
-            .end = endLocation,
+        const tok_span = Span{
+            .start = start_loc,
+            .end = end_location,
         };
-        const identStr = self.ctx.source[tokSpan.start.offset..tokSpan.end.offset];
+        const ident_str = self.ctx.source[tok_span.start.offset..tok_span.end.offset];
 
-        const tokType = Keywords.get(identStr);
+        const tok_type = Keywords.get(ident_str);
 
-        if (tokType) |typ| {
+        if (tok_type) |typ| {
             // try self.addToken(typ, tokSpan);
-            return .{ .kind = typ, .span = tokSpan };
+            return .{ .kind = typ, .span = tok_span };
         }
 
-        return Token{ .kind = .{ .Identifier = identStr }, .span = tokSpan };
+        return Token{ .kind = .{ .identifier = ident_str }, .span = tok_span };
     }
 
     fn makeToken(self: *Lexer) !?Token {
-        const prevLocation = self.currentLocation();
+        const prev_loc = self.currentLocation();
         const c = try self.advance();
 
-        const singleCharTokSpan = Span{ .start = prevLocation, .end = self.currentLocation() };
+        const single_char_tok_span = Span{ .start = prev_loc, .end = self.currentLocation() };
         switch (c) {
-            '+' => return Token{ .kind = .Plus, .span = singleCharTokSpan },
-            '*' => return Token{ .kind = .Star, .span = singleCharTokSpan },
-            '/' => return Token{ .kind = .Slash, .span = singleCharTokSpan },
-            '^' => return Token{ .kind = .Caret, .span = singleCharTokSpan },
-            '(' => return Token{ .kind = .LParen, .span = singleCharTokSpan },
-            ')' => return Token{ .kind = .RParen, .span = singleCharTokSpan },
-            '[' => return Token{ .kind = .LSquare, .span = singleCharTokSpan },
-            ']' => return Token{ .kind = .RSquare, .span = singleCharTokSpan },
-            '{' => return Token{ .kind = .LBrace, .span = singleCharTokSpan },
-            '}' => return Token{ .kind = .RBrace, .span = singleCharTokSpan },
-            ';' => return Token{ .kind = .Semicolon, .span = singleCharTokSpan },
-            ':' => return Token{ .kind = .Colon, .span = singleCharTokSpan },
-            ',' => return Token{ .kind = .Comma, .span = singleCharTokSpan },
-            '∈' => return Token{ .kind = .In, .span = singleCharTokSpan },
-            '×' => return Token{ .kind = .Cross, .span = singleCharTokSpan },
+            '+' => return Token{ .kind = .plus, .span = single_char_tok_span },
+            '*' => return Token{ .kind = .star, .span = single_char_tok_span },
+            '/' => return Token{ .kind = .slash, .span = single_char_tok_span },
+            '^' => return Token{ .kind = .caret, .span = single_char_tok_span },
+            '(' => return Token{ .kind = .lparen, .span = single_char_tok_span },
+            ')' => return Token{ .kind = .rparen, .span = single_char_tok_span },
+            '[' => return Token{ .kind = .lsquare, .span = single_char_tok_span },
+            ']' => return Token{ .kind = .rsquare, .span = single_char_tok_span },
+            '{' => return Token{ .kind = .lbrace, .span = single_char_tok_span },
+            '}' => return Token{ .kind = .rbrace, .span = single_char_tok_span },
+            ';' => return Token{ .kind = .semicolon, .span = single_char_tok_span },
+            ':' => return Token{ .kind = .colon, .span = single_char_tok_span },
+            ',' => return Token{ .kind = .comma, .span = single_char_tok_span },
+            '∈' => return Token{ .kind = .in, .span = single_char_tok_span },
+            '×' => return Token{ .kind = .cross, .span = single_char_tok_span },
 
             '-' => {
                 if (try self.match('>')) {
-                    return Token{ .kind = .RightArrow, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .right_arrow,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 } else {
-                    return Token{ .kind = .Minus, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .minus,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 }
             },
-
-            '0'...'9' => {
-                return try self.makeNumberToken(prevLocation);
-            },
-
-            'a'...'z', 'A'...'Z', '_' => {
-                return try self.makeIdentifierToken(prevLocation);
-            },
-
+            '0'...'9' => return try self.makeNumberToken(prev_loc),
+            'a'...'z', 'A'...'Z', '_' => return try self.makeIdentifierToken(prev_loc),
             '<' => {
                 if (try self.match('=')) {
-                    return Token{ .kind = .LessThanOrEqual, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .less_than_or_equal,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 } else {
-                    return Token{ .kind = .LessThan, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .less_than,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 }
             },
             '>' => {
                 if (try self.match('=')) {
-                    return Token{ .kind = .GreaterThanOrEqual, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .greater_than_or_equal,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 } else {
-                    return Token{ .kind = .GreaterThan, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .greater_than,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 }
             },
             '=' => {
                 if (try self.match('=')) {
-                    return Token{ .kind = .DoubleEqual, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .double_equal,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 } else if (try self.match('>')) {
-                    return Token{ .kind = .DoubleRightArrow, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .double_right_arrow,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 } else {
-                    return Token{ .kind = .Equal, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .equal,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 }
             },
             '!' => {
                 if (try self.match('=')) {
-                    return Token{ .kind = .NotEqual, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .not_equal,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 } else {
-                    return Token{ .kind = .Bang, .span = Span{ .start = prevLocation, .end = self.currentLocation() } };
+                    return Token{
+                        .kind = .bang,
+                        .span = Span{ .start = prev_loc, .end = self.currentLocation() },
+                    };
                 }
             },
 
             else => {
                 if (utils.isSpecial(c)) {
-                    return try self.makeIdentifierToken(prevLocation);
+                    return try self.makeIdentifierToken(prev_loc);
                 }
                 // Unknown character
                 return error.UnexpectedCharacter;
@@ -189,13 +215,13 @@ pub const Lexer = struct {
             }
 
             if (c == '\n') {
-                const startLoc = self.currentLocation();
+                const start_loc = self.currentLocation();
                 _ = try self.advance();
                 try toks.append(
                     self.ctx.allocator,
                     .{
-                        .kind = .Newline,
-                        .span = Span{ .start = startLoc, .end = self.currentLocation() },
+                        .kind = .newline,
+                        .span = Span{ .start = start_loc, .end = self.currentLocation() },
                     },
                 );
                 continue;
@@ -208,7 +234,10 @@ pub const Lexer = struct {
 
         try toks.append(
             self.ctx.allocator,
-            .{ .kind = .Eof, .span = Span{ .start = self.currentLocation(), .end = self.currentLocation() } },
+            .{
+                .kind = .eof,
+                .span = Span{ .start = self.currentLocation(), .end = self.currentLocation() },
+            },
         );
         return toks.toOwnedSlice(self.ctx.allocator);
     }

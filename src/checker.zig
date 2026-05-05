@@ -17,7 +17,7 @@ const DiagnosticBuilder = @import("diagnostic.zig").DiagnosticBuilder;
 // add(x, u) => x + 1;
 
 const TypeExpectation = struct {
-    typeId: TypeId,
+    type_id: TypeId,
     span: ?Span,
     reason: []const u8,
 };
@@ -64,24 +64,24 @@ pub const Checker = struct {
     ctx: *context.CompilerContext,
     exprs: []*ast.Expr,
     scopes: std.ArrayList(*Scope),
-    globalScope: *Scope,
-    typeStore: TypeStore,
-    nextVarId: usize = 0,
+    global_scope: *Scope,
+    type_store: TypeStore,
+    next_var_id: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
-        const globalScope = try ctx.allocator.create(Scope);
-        globalScope.* = Scope.init(ctx.allocator, null);
+        const global_scope = try ctx.allocator.create(Scope);
+        global_scope.* = Scope.init(ctx.allocator, null);
 
         var scopes: std.ArrayList(*Scope) = .empty;
-        try scopes.append(ctx.allocator, globalScope);
+        try scopes.append(ctx.allocator, global_scope);
 
-        const typeArena = TypeStore.init(ctx.allocator);
+        const type_arena = TypeStore.init(ctx.allocator);
 
         std.debug.print("Builtins: Unit={d} Int={d} Bool={d} Error={d}\n", .{
-            typeArena.builtins.Unit,
-            typeArena.builtins.Int,
-            typeArena.builtins.Bool,
-            typeArena.builtins.Error,
+            type_arena.builtins.unit,
+            type_arena.builtins.int,
+            type_arena.builtins.bool,
+            type_arena.builtins.err,
         });
         // _ = try typeArena.addType(.{ .Named = "Unit" });
         // _ = try typeArena.addType(.{ .Named = "Int" });
@@ -92,101 +92,116 @@ pub const Checker = struct {
             .ctx = ctx,
             .exprs = exprs,
             .scopes = scopes,
-            .globalScope = globalScope,
-            .typeStore = typeArena,
+            .global_scope = global_scope,
+            .type_store = type_arena,
         };
     }
 
     pub fn check(self: *Checker) ![]*CheckedExpr {
         // TODO: add a pre-pass to hoist functions
-        var checkedExprs = try self.ctx.allocator.alloc(*CheckedExpr, self.exprs.len);
+        var checked_expr = try self.ctx.allocator.alloc(*CheckedExpr, self.exprs.len);
         for (self.exprs, 0..) |expr, idx| {
-            checkedExprs[idx] = try self.checkExpr(expr, null);
+            checked_expr[idx] = try self.checkExpr(expr, null);
         }
 
-        return checkedExprs;
+        return checked_expr;
     }
 
-    fn checkExpr(self: *Checker, expr: *const ast.Expr, typeExp: ?TypeExpectation) anyerror!*CheckedExpr {
+    fn checkExpr(
+        self: *Checker,
+        expr: *const ast.Expr,
+        type_exp: ?TypeExpectation,
+    ) anyerror!*CheckedExpr {
         switch (expr.*.kind) {
-            .IntLiteral => |int| return try self.typedExpr(
-                .{ .IntLiteral = int },
-                self.typeStore.builtins.Int,
-                typeExp,
+            .int_literal => |int| return try self.typedExpr(
+                .{ .int_literal = int },
+                self.type_store.builtins.int,
+                type_exp,
                 expr.span,
             ),
-            .BoolLiteral => |b| return try self.typedExpr(
-                .{ .BoolLiteral = b },
-                self.typeStore.builtins.Bool,
-                typeExp,
+            .bool_literal => |b| return try self.typedExpr(
+                .{ .bool_literal = b },
+                self.type_store.builtins.bool,
+                type_exp,
                 expr.span,
             ),
-            .UnitLiteral => return try self.typedExpr(
-                .{ .UnitLiteral = {} },
-                self.typeStore.builtins.Unit,
-                typeExp,
+            .unit_literal => return try self.typedExpr(
+                .{ .unit_literal = {} },
+                self.type_store.builtins.unit,
+                type_exp,
                 expr.span,
             ),
-            .Unary => return try self.checkUnaryExpr(expr, typeExp),
-            .Binary => return try self.checkBinaryExpr(expr, typeExp),
-            .VariableDecl => return try self.checkVariableDecl(expr),
-            .Identifier => return try self.checkIdentifier(expr, typeExp),
-            .Block => return try self.checkBlock(expr, typeExp),
-            .FunctionTypeSignature => return try self.checkFunctionTypeSignature(expr),
-            .FunctionDef => return try self.checkFunctionDef(expr),
-            .FunctionCall => return try self.checkFunctionCall(expr, typeExp),
-            .If => return try self.checkIfExpression(expr, typeExp),
+            .unary => return try self.checkUnaryExpr(expr, type_exp),
+            .binary => return try self.checkBinaryExpr(expr, type_exp),
+            .variable_decl => return try self.checkVariableDecl(expr),
+            .identifier => return try self.checkIdentifier(expr, type_exp),
+            .block => return try self.checkBlock(expr, type_exp),
+            .func_type_signature => return try self.checkFunctionTypeSignature(expr),
+            .func_def => return try self.checkFunctionDef(expr),
+            .func_call => return try self.checkFunctionCall(expr, type_exp),
+            .@"if" => return try self.checkIfExpression(expr, type_exp),
             // else => return error.Unimplemented,
         }
     }
 
-    fn checkIfExpression(self: *Checker, expr: *const ast.Expr, typeExp: ?TypeExpectation) !*CheckedExpr {
-        const ifExpr = expr.kind.If;
+    fn checkIfExpression(
+        self: *Checker,
+        expr: *const ast.Expr,
+        type_exp: ?TypeExpectation,
+    ) !*CheckedExpr {
+        const if_expr = expr.kind.@"if";
 
-        const boolExpectation = TypeExpectation{
-            .typeId = self.typeStore.builtins.Bool,
-            .span = ifExpr.condition.span,
+        const bool_exp = TypeExpectation{
+            .type_id = self.type_store.builtins.bool,
+            .span = if_expr.condition.span,
             .reason = "if condition must be of type Bool",
         };
-        const conditionChecked = try self.checkExpr(ifExpr.condition, boolExpectation);
+        const cond_checked = try self.checkExpr(if_expr.condition, bool_exp);
 
-        const thenChecked = try self.checkExpr(ifExpr.thenBranch, typeExp);
+        const then_checked = try self.checkExpr(if_expr.then_branch, type_exp);
 
-        if (ifExpr.elseBranch == null and thenChecked.typeId != self.typeStore.builtins.Unit) {
+        if (if_expr.else_branch == null and then_checked.type_id != self.type_store.builtins.unit) {
             // self.ctx.reportError(
             //     expr.span,
             //     "if expression without else branch must have a Unit-typed body, got `{s}`",
             //     .{self.typeStore.formatTypeName(thenChecked.typeId)},
             // );
-            var d = DiagnosticBuilder.err(self.ctx, "if expression without an else branch must return Unit", .{});
-            _ = d.primaryLabel(
-                thenChecked.kind.Block.tail.?.span, // FIXME: not good
-                "this has type `{s}`, expected `Unit`",
-                .{self.typeStore.formatTypeName(thenChecked.typeId)},
+            var d = DiagnosticBuilder.err(
+                self.ctx,
+                "if expression without an else branch must return Unit",
+                .{},
             );
-            _ = d.note("if expressions without an else branch are used as statements and must not produce a value", .{});
+            _ = d.primaryLabel(
+                then_checked.kind.block.tail.?.span, // FIXME: not good
+                "this has type `{s}`, expected `Unit`",
+                .{self.type_store.formatTypeName(then_checked.type_id)},
+            );
+            _ = d.note(
+                "if expressions without an else branch are used as statements and must not produce a value",
+                .{},
+            );
             d.emit();
 
             return try self.typedExpr(
-                .{ .If = .{
-                    .condition = conditionChecked,
-                    .thenBranch = thenChecked,
-                    .elseBranch = null,
+                .{ .@"if" = .{
+                    .condition = cond_checked,
+                    .then_branch = then_checked,
+                    .else_branch = null,
                 } },
-                self.typeStore.builtins.Error,
-                typeExp,
+                self.type_store.builtins.err,
+                type_exp,
                 expr.span,
             );
         }
 
-        var elseChecked: ?*CheckedExpr = null;
-        if (ifExpr.elseBranch) |elseBranch| {
-            const elseExpectation = if (typeExp) |th| th else TypeExpectation{
-                .typeId = thenChecked.typeId,
-                .span = thenChecked.span,
+        var else_checked: ?*CheckedExpr = null;
+        if (if_expr.else_branch) |elseBranch| {
+            const else_exp = if (type_exp) |th| th else TypeExpectation{
+                .type_id = then_checked.type_id,
+                .span = then_checked.span,
                 .reason = "if branches must have the same type",
             };
-            elseChecked = try self.checkExpr(elseBranch, elseExpectation);
+            else_checked = try self.checkExpr(elseBranch, else_exp);
 
             // if (thenChecked.typeId != elseChecked.?.typeId) { // NOTE: we know there is en else branch
             //     self.ctx.reportError(
@@ -200,76 +215,80 @@ pub const Checker = struct {
             // }
         }
 
-        const resultType = if (elseChecked) |_| thenChecked.typeId else self.typeStore.builtins.Unit;
+        const result_type = if (else_checked) |_| then_checked.type_id else self.type_store.builtins.unit;
         return try self.typedExpr(
-            .{ .If = .{
-                .condition = conditionChecked,
-                .thenBranch = thenChecked,
-                .elseBranch = elseChecked,
+            .{ .@"if" = .{
+                .condition = cond_checked,
+                .then_branch = then_checked,
+                .else_branch = else_checked,
             } },
-            resultType,
-            typeExp,
+            result_type,
+            type_exp,
             expr.span,
         );
     }
 
-    fn checkFunctionCall(self: *Checker, expr: *const ast.Expr, typeExp: ?TypeExpectation) !*CheckedExpr {
-        const funcCall = expr.kind.FunctionCall;
-        const funcSym = self.currentScope().lookupSymbol(funcCall.callee);
-        if (funcSym == null) {
+    fn checkFunctionCall(
+        self: *Checker,
+        expr: *const ast.Expr,
+        type_exp: ?TypeExpectation,
+    ) !*CheckedExpr {
+        const func_call = expr.kind.func_call;
+        const func_sym = self.currentScope().lookupSymbol(func_call.callee);
+        if (func_sym == null) {
             // self.ctx.reportError(
             //     expr.span,
             //     "call to undeclared function `{s}`",
             //     .{funcCall.callee},
             // );
-            var d = DiagnosticBuilder.err(self.ctx, "call to undeclared function `{s}`", .{funcCall.callee});
+            var d = DiagnosticBuilder.err(self.ctx, "call to undeclared function `{s}`", .{func_call.callee});
             _ = d.primaryLabel(expr.span, "function call found here", .{})
                 .note(
                 "declare a function type signature like `{s} : <params> -> <return type>`",
-                .{funcCall.callee},
+                .{func_call.callee},
             );
             d.emit();
             return try self.typedExpr(
                 .{
-                    .FunctionCall = .{
-                        .callee = funcCall.callee,
+                    .func_call = .{
+                        .callee = func_call.callee,
                         .args = &[_]*const CheckedExpr{},
                         .id = 0, // NOTE: id doesn't matter since it's error-typed
                     },
                 },
-                self.typeStore.builtins.Error,
-                typeExp,
+                self.type_store.builtins.err,
+                type_exp,
                 expr.span,
             );
         }
 
-        if (funcSym.?.kind != .Function) {
-            var d = DiagnosticBuilder.err(self.ctx, "symbol `{s}` is not a function", .{funcCall.callee});
+        if (func_sym.?.kind != .Function) {
+            var d = DiagnosticBuilder.err(self.ctx, "symbol `{s}` is not a function", .{func_call.callee});
             _ = d.primaryLabel(expr.span, "call found here", .{})
                 .note(
                 "`{s}` is of type `{s}`",
-                .{ funcCall.callee, self.typeStore.formatTypeName(funcSym.?.typeId) },
+                .{ func_call.callee, self.type_store.formatTypeName(func_sym.?.type_id) },
             );
             d.emit();
             return try self.typedExpr(
                 .{
-                    .FunctionCall = .{
-                        .callee = funcCall.callee,
+                    .func_call = .{
+                        .callee = func_call.callee,
                         .args = &[_]*const CheckedExpr{},
                         .id = 0, // NOTE: id doesn't matter since it's error-typed
                     },
                 },
-                self.typeStore.builtins.Error,
-                typeExp,
+                self.type_store.builtins.err,
+                type_exp,
                 expr.span,
             );
         }
 
-        const domainId = self.typeStore.types.items[funcSym.?.typeId].Function.domain;
-        const codomainId = self.typeStore.types.items[funcSym.?.typeId].Function.codomain;
+        const domain_id = self.type_store.types.items[func_sym.?.type_id].function.domain;
+        const codomain_id = self.type_store.types.items[func_sym.?.type_id].function.codomain;
 
-        const paramTypes = try self.collectParamTypes(domainId);
-        if (paramTypes.len != funcCall.args.len) {
+        const param_types = try self.collectParamTypes(domain_id);
+        if (param_types.len != func_call.args.len) {
             // self.ctx.reportError(
             //     expr.span,
             //     "function `{s}` expecte {d} arguments, got {d}",
@@ -278,109 +297,121 @@ pub const Checker = struct {
             var d = DiagnosticBuilder.err(
                 self.ctx,
                 "function `{s}` expected {d} arguments, got {d}",
-                .{ funcCall.callee, paramTypes.len, funcCall.args.len },
+                .{ func_call.callee, param_types.len, func_call.args.len },
             );
             d.primaryLabel(expr.span, "function call found here", .{}).emit();
         }
 
-        var checkedArgs = try self.ctx.allocator.alloc(*CheckedExpr, funcCall.args.len);
-        for (funcCall.args, 0..) |argExpr, idx| {
-            const expectedTypeId = if (idx < paramTypes.len) paramTypes[idx] else self.typeStore.builtins.Error;
-            const argExpectation = TypeExpectation{
-                .typeId = expectedTypeId,
+        var checked_args = try self.ctx.allocator.alloc(*CheckedExpr, func_call.args.len);
+        for (func_call.args, 0..) |argExpr, idx| {
+            const expected_type_id = if (idx < param_types.len)
+                param_types[idx]
+            else
+                self.type_store.builtins.err;
+
+            const arg_exp = TypeExpectation{
+                .type_id = expected_type_id,
                 .span = null, // TODO: store param spans in Symbol
                 .reason = "function parameter type",
             };
-            checkedArgs[idx] = try self.checkExpr(argExpr, argExpectation);
+            checked_args[idx] = try self.checkExpr(argExpr, arg_exp);
         }
 
         return try self.typedExpr(
             .{
-                .FunctionCall = .{
-                    .callee = funcCall.callee,
-                    .args = checkedArgs,
-                    .id = funcSym.?.id,
+                .func_call = .{
+                    .callee = func_call.callee,
+                    .args = checked_args,
+                    .id = func_sym.?.id,
                 },
             },
-            codomainId,
-            typeExp,
+            codomain_id,
+            type_exp,
             expr.span,
         );
     }
 
     fn checkFunctionDef(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
-        const funcDef = expr.kind.FunctionDef;
-        const funcSig = self.currentScope().lookupSymbol(funcDef.name);
+        const func_def = expr.kind.func_def;
+        const func_sig = self.currentScope().lookupSymbol(func_def.name);
 
-        if (funcSig) |sym| {
+        if (func_sig) |sym| {
             if (sym.kind != .Function) {
-                var d = DiagnosticBuilder.err(self.ctx, "symbol `{s}` already declared and is not a function", .{funcDef.name});
+                var d = DiagnosticBuilder.err(
+                    self.ctx,
+                    "symbol `{s}` already declared and is not a function",
+                    .{func_def.name},
+                );
                 _ = d.primaryLabel(expr.span, "function definition found here", .{})
                     .note(
                     "`{s}` is of type `{s}`",
-                    .{ funcDef.name, self.typeStore.formatTypeName(sym.typeId) },
+                    .{ func_def.name, self.type_store.formatTypeName(sym.type_id) },
                 );
                 d.emit();
                 return try self.typedExpr(
                     .{
-                        .FunctionDecl = .{
-                            .name = funcDef.name,
+                        .func_decl = .{
+                            .name = func_def.name,
                             .body = undefined,
                             .params = undefined,
                             .id = sym.id,
                         },
                     },
-                    self.typeStore.builtins.Error,
+                    self.type_store.builtins.err,
                     null,
                     expr.span,
                 );
             }
         }
 
-        var checkedParams: std.ArrayList(cheked_ast.Param) = .empty;
+        var checked_params: std.ArrayList(cheked_ast.Param) = .empty;
 
-        if (funcSig == null) {
-            var d = DiagnosticBuilder.err(self.ctx, "function `{s}` has no type signature", .{funcDef.name});
+        if (func_sig == null) {
+            var d = DiagnosticBuilder.err(
+                self.ctx,
+                "function `{s}` has no type signature",
+                .{func_def.name},
+            );
             _ = d.primaryLabel(expr.span, "definition found here", .{});
-            _ = d.note("add a signature like `{s} : <params> -> <return type>`", .{funcDef.name});
+            _ = d.note("add a signature like `{s} : <params> -> <return type>`", .{func_def.name});
             d.emit();
             return try self.typedExpr(
                 .{
-                    .FunctionDecl = .{
-                        .name = funcDef.name,
+                    .func_decl = .{
+                        .name = func_def.name,
                         .body = undefined,
                         .params = undefined,
                         .id = 0, // NOTE: id doesn't matter since it's error-typed
                     },
                 },
-                self.typeStore.builtins.Error,
+                self.type_store.builtins.err,
                 null,
                 expr.span,
             );
         }
 
-        const domainId = self.typeStore.types.items[funcSig.?.typeId].Function.domain;
-        const codomainId = self.typeStore.types.items[funcSig.?.typeId].Function.codomain;
+        const domain_id = self.type_store.types.items[func_sig.?.type_id].function.domain;
+        const codomain_id = self.type_store.types.items[func_sig.?.type_id].function.codomain;
 
-        const params = try self.collectParamTypes(domainId);
-        if (funcDef.params.len != params.len) {
+        const params = try self.collectParamTypes(domain_id);
+        if (func_def.params.len != params.len) {
             var d = DiagnosticBuilder.err(
                 self.ctx,
                 "function `{s}` type signature declares {d} parameters, but definition has {d}",
-                .{ funcDef.name, params.len, funcDef.params.len },
+                .{ func_def.name, params.len, func_def.params.len },
             );
-            _ = d.primaryLabel(expr.span, "but found {d} here", .{funcDef.params.len})
-                .secondaryLabel(funcSig.?.domainSpan.?, "expected {d} params here", .{params.len})
+            _ = d.primaryLabel(expr.span, "but found {d} here", .{func_def.params.len})
+                .secondaryLabel(func_sig.?.domain_span.?, "expected {d} params here", .{params.len})
                 .emit();
 
             return try self.typedExpr(
-                .{ .FunctionDecl = .{
-                    .name = funcDef.name,
+                .{ .func_decl = .{
+                    .name = func_def.name,
                     .body = undefined,
                     .params = undefined,
-                    .id = funcSig.?.id,
+                    .id = func_sig.?.id,
                 } },
-                self.typeStore.builtins.Error,
+                self.type_store.builtins.err,
                 null,
                 expr.span,
             );
@@ -388,7 +419,7 @@ pub const Checker = struct {
 
         std.debug.print("Collected param types: ", .{});
         for (params) |pid| {
-            std.debug.print("{s} ", .{self.typeStore.formatTypeName(pid)});
+            std.debug.print("{s} ", .{self.type_store.formatTypeName(pid)});
         }
         std.debug.print("\n", .{});
 
@@ -396,116 +427,119 @@ pub const Checker = struct {
         defer self.exitScope();
 
         for (params, 0..) |paramTypeId, idx| {
-            const paramName = funcDef.params[idx];
+            const param_name = func_def.params[idx];
             const id = self.getNewVarId();
 
-            try checkedParams.append(self.ctx.allocator, .{
-                .name = paramName,
-                .typeId = paramTypeId,
+            try checked_params.append(self.ctx.allocator, .{
+                .name = param_name,
+                .type_id = paramTypeId,
                 .id = id,
             });
-            const paramSym = type_store.Symbol{
-                .name = paramName,
-                .typeId = paramTypeId,
+            const param_sym = type_store.Symbol{
+                .name = param_name,
+                .type_id = paramTypeId,
                 .kind = .Variable,
                 .id = id,
                 .span = expr.span, // FIXME: add spans to params
-                .domainSpan = null,
-                .codomainSpan = null,
+                .domain_span = null,
+                .codomain_span = null,
             };
-            try self.currentScope().defineSymbol(paramSym);
+            try self.currentScope().defineSymbol(param_sym);
         }
 
-        const returnExpectation = TypeExpectation{
-            .typeId = codomainId,
-            .span = funcSig.?.codomainSpan,
+        const return_exp = TypeExpectation{
+            .type_id = codomain_id,
+            .span = func_sig.?.codomain_span,
             .reason = "declared return type here",
         };
-        const bodyChecked = try self.checkExpr(funcDef.body, returnExpectation);
+        const body_checked = try self.checkExpr(func_def.body, return_exp);
 
         return try self.typedExpr(
-            .{ .FunctionDecl = .{
-                .name = funcDef.name,
-                .body = bodyChecked,
-                .params = try checkedParams.toOwnedSlice(self.ctx.allocator),
-                .id = funcSig.?.id,
+            .{ .func_decl = .{
+                .name = func_def.name,
+                .body = body_checked,
+                .params = try checked_params.toOwnedSlice(self.ctx.allocator),
+                .id = func_sig.?.id,
             } },
-            funcSig.?.typeId,
+            func_sig.?.type_id,
             null,
             expr.span,
         );
     }
 
-    fn collectParamTypes(self: *const Checker, typeId: TypeId) ![]TypeId {
-        const typeItem = self.typeStore.types.items[typeId];
-        var paramTypes: std.ArrayList(TypeId) = .empty;
+    fn collectParamTypes(self: *const Checker, type_id: TypeId) ![]TypeId {
+        const type_item = self.type_store.types.items[type_id];
+        var param_types: std.ArrayList(TypeId) = .empty;
 
-        switch (typeItem) {
+        switch (type_item) {
             // .Named => |name| {
             //     if (std.mem.eql(u8, name, "Unit")) {
             //         return paramTypes.toOwnedSlice(self.ctx.allocator); // special case for no function params
             //     }
             //     try paramTypes.append(self.ctx.allocator, typeId);
             // },
-            .Unit => {}, // NOTE: is this good?
-            .Product => |prod| {
+            .unit => {}, // NOTE: is this good?
+            .product => |prod| {
                 // try paramTypes.append(self.ctx.allocator, prod.left);
-                const leftTids = try self.collectParamTypes(prod.left);
-                for (leftTids) |tid| {
-                    try paramTypes.append(self.ctx.allocator, tid);
+                const left_tids = try self.collectParamTypes(prod.left);
+                for (left_tids) |tid| {
+                    try param_types.append(self.ctx.allocator, tid);
                 }
-                const rightTids = try self.collectParamTypes(prod.right);
-                for (rightTids) |tid| {
-                    try paramTypes.append(self.ctx.allocator, tid);
+                const right_tids = try self.collectParamTypes(prod.right);
+                for (right_tids) |tid| {
+                    try param_types.append(self.ctx.allocator, tid);
                 }
             },
             else => {
-                try paramTypes.append(self.ctx.allocator, typeId);
+                try param_types.append(self.ctx.allocator, type_id);
             },
         }
 
-        return paramTypes.toOwnedSlice(self.ctx.allocator);
+        return param_types.toOwnedSlice(self.ctx.allocator);
     }
 
     fn checkFunctionTypeSignature(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
-        const funcSig = expr.kind.FunctionTypeSignature;
+        const func_sig = expr.kind.func_type_signature;
 
         // these should be safe unwraps since we only ever assign a `Function` type
         // whenever we create a function in the parser
-        const domain = funcSig.ty.kind.Function.domain;
-        const codomain = funcSig.ty.kind.Function.codomain;
-        const domainId = try self.resolveTypeExpr(domain);
-        const codomainId = try self.resolveTypeExpr(codomain);
+        const domain = func_sig.ty.kind.function.domain;
+        const codomain = func_sig.ty.kind.function.codomain;
+        const domain_id = try self.resolveTypeExpr(domain);
+        const codomain_id = try self.resolveTypeExpr(codomain);
 
-        std.debug.print("domainId: {d}, codomainId: {d}\n", .{ domainId, codomainId });
+        std.debug.print("domainId: {d}, codomainId: {d}\n", .{ domain_id, codomain_id });
 
-        const funcTypeId = try self.typeStore.addType(
-            .{ .Function = .{
-                .domain = domainId,
-                .codomain = codomainId,
+        const func_type_id = try self.type_store.addType(
+            .{ .function = .{
+                .domain = domain_id,
+                .codomain = codomain_id,
             } },
         );
 
-        std.debug.print("Function `{s}` has typeId `{d}` with {any}\n", .{ funcSig.name, funcTypeId, self.typeStore.types.items[funcTypeId].Function });
+        std.debug.print(
+            "Function `{s}` has typeId `{d}` with {any}\n",
+            .{ func_sig.name, func_type_id, self.type_store.types.items[func_type_id].function },
+        );
 
         const id = self.getNewVarId();
-        const funcSym = type_store.Symbol{
-            .name = funcSig.name,
-            .typeId = funcTypeId,
+        const func_sym = type_store.Symbol{
+            .name = func_sig.name,
+            .type_id = func_type_id,
             .kind = .Function,
             .id = id,
             .span = expr.span,
-            .domainSpan = domain.span,
-            .codomainSpan = codomain.span,
+            .domain_span = domain.span,
+            .codomain_span = codomain.span,
         };
 
-        self.currentScope().defineSymbol(funcSym) catch |err| switch (err) {
+        self.currentScope().defineSymbol(func_sym) catch |err| switch (err) {
             error.SymbolAlreadyDefined => {
-                const previous = self.currentScope().lookupSymbol(funcSig.name).?;
+                const previous = self.currentScope().lookupSymbol(func_sig.name).?;
                 var d = DiagnosticBuilder.err(
                     self.ctx,
                     "function `{s}` already declared in this scope",
-                    .{funcSig.name},
+                    .{func_sig.name},
                 );
                 _ = d.primaryLabel(expr.span, "redeclared here", .{});
                 _ = d.secondaryLabel(previous.span, "first declared here", .{});
@@ -516,13 +550,13 @@ pub const Checker = struct {
 
         return try self.typedExpr(
             .{
-                .FunctionTypeSignature = .{
-                    .name = funcSig.name,
-                    .domain = .{ .typeId = domainId, .span = domain.span },
-                    .codomain = .{ .typeId = codomainId, .span = codomain.span },
+                .func_type_signature = .{
+                    .name = func_sig.name,
+                    .domain = .{ .type_id = domain_id, .span = domain.span },
+                    .codomain = .{ .type_id = codomain_id, .span = codomain.span },
                 },
             },
-            self.typeStore.builtins.Unit,
+            self.type_store.builtins.unit,
             null,
             expr.span,
         );
@@ -530,34 +564,34 @@ pub const Checker = struct {
 
     fn resolveTypeExpr(self: *Checker, type_expr: *const ast.TypeExpr) !TypeId {
         switch (type_expr.kind) {
-            .Named => |typeName| {
-                if (self.typeStore.resolve(typeName)) |tid| {
+            .named => |typeName| {
+                if (self.type_store.resolve(typeName)) |tid| {
                     return tid;
                 } else {
                     var d = DiagnosticBuilder.err(self.ctx, "unknown type `{s}`", .{typeName});
                     _ = d.primaryLabel(type_expr.span, "type not found in scope", .{});
                     d.emit();
-                    return self.typeStore.builtins.Error;
+                    return self.type_store.builtins.err;
                 }
             },
-            .Unit => return self.typeStore.builtins.Unit,
-            .Product => |prod| {
-                const leftId = try self.resolveTypeExpr(prod.left);
-                const rightId = try self.resolveTypeExpr(prod.right);
-                return self.typeStore.addType(
-                    .{ .Product = .{
-                        .left = leftId,
-                        .right = rightId,
+            .unit => return self.type_store.builtins.unit,
+            .product => |prod| {
+                const left_id = try self.resolveTypeExpr(prod.left);
+                const right_id = try self.resolveTypeExpr(prod.right);
+                return self.type_store.addType(
+                    .{ .product = .{
+                        .left = left_id,
+                        .right = right_id,
                     } },
                 );
             },
-            .Function => |func| {
-                const domainId = try self.resolveTypeExpr(func.domain);
-                const codomainId = try self.resolveTypeExpr(func.codomain);
-                return self.typeStore.addType(
-                    .{ .Function = .{
-                        .domain = domainId,
-                        .codomain = codomainId,
+            .function => |func| {
+                const domain_id = try self.resolveTypeExpr(func.domain);
+                const codomain_id = try self.resolveTypeExpr(func.codomain);
+                return self.type_store.addType(
+                    .{ .function = .{
+                        .domain = domain_id,
+                        .codomain = codomain_id,
                     } },
                 );
             },
@@ -572,122 +606,93 @@ pub const Checker = struct {
         }
     }
 
-    // fn resolveTypeExpr(self: *Checker, expr: *const ast.Expr) !TypeId {
-    //     switch (expr.kind) {
-    //         .Identifier => |typeName| {
-    //             if (self.typeStore.get(.{ .Named = typeName })) |tid| {
-    //                 return tid;
-    //             } else {
-    //                 var d = DiagnosticBuilder.err(self.ctx, "unknown type `{s}`", .{typeName});
-    //                 _ = d.primaryLabel(expr.span, "type not found in scope", .{});
-    //                 d.emit();
-    //                 return self.typeStore.builtins.Error;
-    //             }
-    //         },
-    //         .Binary => |bin| switch (bin.operator) {
-    //             .TypeProduct => {
-    //                 const leftId = try self.resolveTypeExpr(bin.left);
-    //                 const rightId = try self.resolveTypeExpr(bin.right);
-    //                 return self.typeStore.addType(
-    //                     .{ .Product = .{
-    //                         .left = leftId,
-    //                         .right = rightId,
-    //                     } },
-    //                 );
-    //             },
-    //             .Exponent => return error.Unimplemented,
-    //             else => {
-    //                 self.ctx.reportError(
-    //                     expr.span,
-    //                     "invalid operator in type expression",
-    //                     .{},
-    //                 );
-    //                 return self.typeStore.builtins.Error;
-    //             },
-    //         },
-    //         else => {
-    //             self.ctx.reportError(
-    //                 expr.span,
-    //                 "invalid type expression",
-    //                 .{},
-    //             );
-    //             return self.typeStore.builtins.Error;
-    //         },
-    //     }
-    // }
-
-    fn checkBlock(self: *Checker, expr: *const ast.Expr, typeExp: ?TypeExpectation) !*CheckedExpr {
-        const block = expr.kind.Block;
+    fn checkBlock(self: *Checker, expr: *const ast.Expr, type_exp: ?TypeExpectation) !*CheckedExpr {
+        const block = expr.kind.block;
 
         try self.enterNewScope();
         defer self.exitScope();
 
-        var checkedStmts = try self.ctx.allocator.alloc(*CheckedExpr, block.stmts.len);
+        var checked_stmts = try self.ctx.allocator.alloc(*CheckedExpr, block.stmts.len);
         for (block.stmts, 0..) |stmt, idx| {
-            checkedStmts[idx] = try self.checkExpr(stmt, null);
+            checked_stmts[idx] = try self.checkExpr(stmt, null);
         }
 
-        var tailChecked: ?*CheckedExpr = null;
+        var tail_checked: ?*CheckedExpr = null;
         if (block.tail) |tailExpr| {
-            tailChecked = try self.checkExpr(tailExpr, typeExp);
+            tail_checked = try self.checkExpr(tailExpr, type_exp);
         }
 
         return try self.typedExpr(
-            .{ .Block = .{
-                .stmts = checkedStmts,
-                .tail = tailChecked,
+            .{ .block = .{
+                .stmts = checked_stmts,
+                .tail = tail_checked,
             } },
-            if (tailChecked) |t| t.typeId else self.typeStore.builtins.Unit,
-            typeExp,
+            if (tail_checked) |t| t.type_id else self.type_store.builtins.unit,
+            type_exp,
             expr.span,
         );
     }
 
-    fn checkIdentifier(self: *Checker, expr: *const ast.Expr, typeExp: ?TypeExpectation) !*CheckedExpr {
-        const identName = expr.kind.Identifier;
-        const symbol = self.currentScope().lookupSymbol(identName);
+    fn checkIdentifier(
+        self: *Checker,
+        expr: *const ast.Expr,
+        type_exp: ?TypeExpectation,
+    ) !*CheckedExpr {
+        const ident_name = expr.kind.identifier;
+        const symbol = self.currentScope().lookupSymbol(ident_name);
         if (symbol == null) {
             // self.ctx.reportError(expr.span, "undeclared variable `{s}`", .{identName});
-            var d = DiagnosticBuilder.err(self.ctx, "undeclared variable `{s}`", .{identName});
+            var d = DiagnosticBuilder.err(self.ctx, "undeclared variable `{s}`", .{ident_name});
             _ = d.primaryLabel(expr.span, "use found here", .{});
             d.emit();
 
             // Return a dummy expr of error type
             return try self.typedExpr(
-                .{ .Identifier = .{ .name = identName, .id = 0 } }, // NOTE: id doesn't matter since it's error-typed
-                self.typeStore.builtins.Error,
+                .{ .identifier = .{ .name = ident_name, .id = 0 } }, // NOTE: id doesn't matter since it's error-typed
+                self.type_store.builtins.err,
                 null,
                 expr.span,
             );
         }
 
-        std.debug.print("Identifier `{s}` resolved to `{s}`\n", .{ identName, self.typeStore.formatTypeName(symbol.?.typeId) });
+        std.debug.print("Identifier `{s}` resolved to `{s}`\n", .{
+            ident_name,
+            self.type_store.formatTypeName(symbol.?.type_id),
+        });
         return try self.typedExpr(
-            .{ .Identifier = .{ .name = identName, .id = symbol.?.id } },
-            symbol.?.typeId,
-            typeExp,
+            .{ .identifier = .{ .name = ident_name, .id = symbol.?.id } },
+            symbol.?.type_id,
+            type_exp,
             expr.span,
         );
     }
 
     fn checkVariableDecl(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
-        const varDecl = expr.kind.VariableDecl;
+        const var_decl = expr.kind.variable_decl;
         // var expectedTypeId: ?TypeId = null;
 
-        if (self.typeStore.resolve(varDecl.name)) |_| {
+        if (self.type_store.resolve(var_decl.name)) |_| {
             // self.ctx.reportError(
             //     expr.span,
             //     "variable `{s}` shadows type name",
             //     .{varDecl.name},
             // );
-            var d = DiagnosticBuilder.err(self.ctx, "variable `{s}` shadows a type name", .{varDecl.name});
-            _ = d.primaryLabel(expr.span, "`{s}` is a type, not a valid variable name", .{varDecl.name});
+            var d = DiagnosticBuilder.err(
+                self.ctx,
+                "variable `{s}` shadows a type name",
+                .{var_decl.name},
+            );
+            _ = d.primaryLabel(
+                expr.span,
+                "`{s}` is a type, not a valid variable name",
+                .{var_decl.name},
+            );
             _ = d.note("types in scope: Int, Bool, Unit", .{}); // TODO: enumarate types in scope
             d.emit();
         }
 
-        var valueExpectation: ?TypeExpectation = null;
-        if (varDecl.type) |typeExpr| {
+        var value_exp: ?TypeExpectation = null;
+        if (var_decl.type) |typeExpr| {
             // if (self.typeStore.get(.{ .Named = typeExpr })) |tid| {
             //     expectedTypeId = tid;
             // } else {
@@ -698,59 +703,65 @@ pub const Checker = struct {
             //     );
             //     expectedTypeId = self.typeStore.builtins.Error;
             // }
-            const expectedTypeId = try self.resolveTypeExpr(typeExpr);
-            valueExpectation = TypeExpectation{
-                .typeId = expectedTypeId,
+            const expected_type_id = try self.resolveTypeExpr(typeExpr);
+            value_exp = TypeExpectation{
+                .type_id = expected_type_id,
                 .span = typeExpr.span,
                 .reason = "declared type annotation here",
             };
         }
 
-        const valueChecked = try self.checkExpr(varDecl.value, valueExpectation);
+        const value_checked = try self.checkExpr(var_decl.value, value_exp);
 
         const id = self.getNewVarId();
 
-        var resultType: TypeId = self.typeStore.builtins.Unit;
-        if (self.typeStore.resolve(varDecl.name)) |_| {
+        var result_type: TypeId = self.type_store.builtins.unit;
+        if (self.type_store.resolve(var_decl.name)) |_| {
             // NOTE: ????
             // self.ctx.reportError(
             //     expr.span,
             //     "variable `{s}` shadows type name",
             //     .{varDecl.name},
             // );
-            resultType = self.typeStore.builtins.Error;
+            result_type = self.type_store.builtins.err;
         } else {
-            self.declareVariable(varDecl.name, valueChecked.typeId, id, expr.span) catch |err| switch (err) {
+            self.declareVariable(var_decl.name, value_checked.type_id, id, expr.span) catch |err| switch (err) {
                 error.VariableAlreadyDeclared => {
                     // TODO: add secondary label pointing to the original declaration (when `Symbol` stores span)
-                    const previous = self.currentScope().lookupSymbol(varDecl.name).?;
+                    const previous = self.currentScope().lookupSymbol(var_decl.name).?;
                     var d = DiagnosticBuilder.err(
                         self.ctx,
                         "variable `{s}` already declared in this scope",
-                        .{varDecl.name},
+                        .{var_decl.name},
                     );
                     _ = d.primaryLabel(expr.span, "redeclared here", .{});
                     _ = d.secondaryLabel(previous.span, "first declared here", .{});
                     d.emit();
-                    resultType = self.typeStore.builtins.Error;
+                    result_type = self.type_store.builtins.err;
                 },
                 else => return err,
             };
         }
 
         return try self.typedExpr(
-            .{ .VariableDecl = .{
-                .name = varDecl.name,
-                .value = valueChecked,
+            .{ .variable_decl = .{
+                .name = var_decl.name,
+                .value = value_checked,
                 .id = id,
             } },
-            resultType,
+            result_type,
             null,
             expr.span,
         );
     }
 
-    fn declareVariable(self: *Checker, name: []const u8, typeId: TypeId, id: usize, span: Span) !void {
+    fn declareVariable(
+        self: *Checker,
+        name: []const u8,
+        type_id: TypeId,
+        id: usize,
+        span: Span,
+    ) !void {
         const scope = self.currentScope();
         // if (scope.lookupSymbol(name)) |_| {
         //     return error.VariableAlreadyDeclared;
@@ -761,163 +772,187 @@ pub const Checker = struct {
 
         const symbol = type_store.Symbol{
             .name = name,
-            .typeId = typeId,
+            .type_id = type_id,
             .kind = .Variable,
             .id = id,
             .span = span,
-            .domainSpan = null,
-            .codomainSpan = null,
+            .domain_span = null,
+            .codomain_span = null,
         };
 
         try self.currentScope().defineSymbol(symbol);
     }
 
-    fn checkBinaryExpr(self: *Checker, expr: *const ast.Expr, expected: ?TypeExpectation) !*CheckedExpr {
-        const binary = expr.kind.Binary;
+    fn checkBinaryExpr(
+        self: *Checker,
+        expr: *const ast.Expr,
+        expected: ?TypeExpectation,
+    ) !*CheckedExpr {
+        const binary = expr.kind.binary;
         switch (binary.operator) {
-            .Plus, .Minus, .Multiply, .Divide, .Exponent => {
-                const intExpectation = TypeExpectation{
-                    .typeId = self.typeStore.builtins.Int,
+            .plus, .minus, .multiply, .divide, .exponent => {
+                const int_exp = TypeExpectation{
+                    .type_id = self.type_store.builtins.int,
                     .span = null, // NOTE: should this be null?
                     .reason = "arithmetic operator requires Int operands",
                 };
 
-                const leftChecked = try self.checkExpr(binary.left, intExpectation);
-                const rightChecked = try self.checkExpr(binary.right, intExpectation);
+                const left_checked = try self.checkExpr(binary.left, int_exp);
+                const right_checked = try self.checkExpr(binary.right, int_exp);
 
-                var resultType: TypeId = self.typeStore.builtins.Int;
-                if (leftChecked.typeId == self.typeStore.builtins.Error or rightChecked.typeId == self.typeStore.builtins.Error) {
-                    resultType = self.typeStore.builtins.Error;
+                var result_type: TypeId = self.type_store.builtins.int;
+                if (left_checked.type_id == self.type_store.builtins.err or
+                    right_checked.type_id == self.type_store.builtins.err)
+                {
+                    result_type = self.type_store.builtins.err;
                 }
 
                 return try self.typedExpr(
-                    .{ .Binary = .{
-                        .left = leftChecked,
+                    .{ .binary = .{
+                        .left = left_checked,
                         .operator = binary.operator,
-                        .right = rightChecked,
+                        .right = right_checked,
                     } },
-                    resultType,
+                    result_type,
                     expected,
                     expr.span,
                 );
             },
-            .LessThan, .GreaterThan, .LessThanOrEqual, .GreaterThanOrEqual => {
-                const intExpectation = TypeExpectation{
-                    .typeId = self.typeStore.builtins.Int,
+            .less_than, .greater_than, .less_than_or_eq, .greater_than_or_eq => {
+                const int_exp = TypeExpectation{
+                    .type_id = self.type_store.builtins.int,
                     .span = null, // NOTE: should this be null?
                     .reason = "comparison operator requires Int operands",
                 };
 
-                const leftChecked = try self.checkExpr(binary.left, intExpectation);
-                const rightChecked = try self.checkExpr(binary.right, intExpectation);
+                const left_checked = try self.checkExpr(binary.left, int_exp);
+                const right_checked = try self.checkExpr(binary.right, int_exp);
 
-                var resultType: TypeId = self.typeStore.builtins.Bool;
-                if (leftChecked.typeId == self.typeStore.builtins.Error or rightChecked.typeId == self.typeStore.builtins.Error) {
-                    resultType = self.typeStore.builtins.Error;
+                var result_type: TypeId = self.type_store.builtins.bool;
+                if (left_checked.type_id == self.type_store.builtins.err or
+                    right_checked.type_id == self.type_store.builtins.err)
+                {
+                    result_type = self.type_store.builtins.err;
                 }
 
                 return try self.typedExpr(
-                    .{ .Binary = .{
-                        .left = leftChecked,
+                    .{ .binary = .{
+                        .left = left_checked,
                         .operator = binary.operator,
-                        .right = rightChecked,
+                        .right = right_checked,
                     } },
-                    resultType,
+                    result_type,
                     expected,
                     expr.span,
                 );
             },
-            .Equal, .NotEqual => {
-                const leftChecked = try self.checkExpr(binary.left, null);
-                const leftExpectation = TypeExpectation{
-                    .typeId = leftChecked.typeId,
+            .equal, .not_equal => {
+                const left_checked = try self.checkExpr(binary.left, null);
+                const left_exp = TypeExpectation{
+                    .type_id = left_checked.type_id,
                     .span = null, // NOTE: should this be null?
                     .reason = "equality operator requires both operands to have the same type",
                 };
-                const rightChecked = try self.checkExpr(binary.right, leftExpectation);
+                const right_checked = try self.checkExpr(binary.right, left_exp);
 
-                var resultType: TypeId = self.typeStore.builtins.Bool;
-                if (leftChecked.typeId == self.typeStore.builtins.Error or rightChecked.typeId == self.typeStore.builtins.Error) {
-                    resultType = self.typeStore.builtins.Error;
+                var result_type: TypeId = self.type_store.builtins.bool;
+                if (left_checked.type_id == self.type_store.builtins.err or
+                    right_checked.type_id == self.type_store.builtins.err)
+                {
+                    result_type = self.type_store.builtins.err;
                 }
 
                 return try self.typedExpr(
-                    .{ .Binary = .{
-                        .left = leftChecked,
+                    .{ .binary = .{
+                        .left = left_checked,
                         .operator = binary.operator,
-                        .right = rightChecked,
+                        .right = right_checked,
                     } },
-                    resultType,
+                    result_type,
                     expected,
                     expr.span,
                 );
             },
-            .LogicalOr, .LogicalAnd => {
-                const boolExpectation = TypeExpectation{
-                    .typeId = self.typeStore.builtins.Bool,
+            .logical_or, .logical_and => {
+                const bool_exp = TypeExpectation{
+                    .type_id = self.type_store.builtins.bool,
                     .span = null, // NOTE: should this be null?
                     .reason = "logical operator requires Bool operands",
                 };
-                const leftChecked = try self.checkExpr(binary.left, boolExpectation);
-                const rightChecked = try self.checkExpr(binary.right, boolExpectation);
+                const left_checked = try self.checkExpr(binary.left, bool_exp);
+                const right_checked = try self.checkExpr(binary.right, bool_exp);
 
-                var resultType: TypeId = self.typeStore.builtins.Bool;
-                if (leftChecked.typeId == self.typeStore.builtins.Error or rightChecked.typeId == self.typeStore.builtins.Error) {
-                    resultType = self.typeStore.builtins.Error;
+                var result_type: TypeId = self.type_store.builtins.bool;
+                if (left_checked.type_id == self.type_store.builtins.err or
+                    right_checked.type_id == self.type_store.builtins.err)
+                {
+                    result_type = self.type_store.builtins.err;
                 }
 
                 return try self.typedExpr(
-                    .{ .Binary = .{
-                        .left = leftChecked,
+                    .{ .binary = .{
+                        .left = left_checked,
                         .operator = binary.operator,
-                        .right = rightChecked,
+                        .right = right_checked,
                     } },
-                    resultType,
+                    result_type,
                     expected,
                     expr.span,
                 );
             },
-            .TypeProduct => return error.IdkLol,
+            .type_prod => return error.IdkLol,
         }
     }
 
-    fn checkUnaryExpr(self: *Checker, expr: *const ast.Expr, expected: ?TypeExpectation) !*CheckedExpr {
-        const unary = expr.kind.Unary;
+    fn checkUnaryExpr(
+        self: *Checker,
+        expr: *const ast.Expr,
+        expected: ?TypeExpectation,
+    ) !*CheckedExpr {
+        const unary = expr.kind.unary;
         switch (unary.operator) {
-            .Plus, .Minus => {
-                const intExpectation = TypeExpectation{
-                    .typeId = self.typeStore.builtins.Int,
+            .plus, .minus => {
+                const int_exp = TypeExpectation{
+                    .type_id = self.type_store.builtins.int,
                     .span = null, // NOTE: should this be null?
                     .reason = "unary plus and minus require Int operand",
                 };
-                const rightChecked = try self.checkExpr(unary.right, intExpectation);
+                const right_checked = try self.checkExpr(unary.right, int_exp);
 
-                const resultType = if (rightChecked.typeId == self.typeStore.builtins.Error) self.typeStore.builtins.Error else self.typeStore.builtins.Int;
+                const result_type = if (right_checked.type_id == self.type_store.builtins.err)
+                    self.type_store.builtins.err
+                else
+                    self.type_store.builtins.int;
+
                 return try self.typedExpr(
-                    .{ .Unary = .{
+                    .{ .unary = .{
                         .operator = unary.operator,
-                        .right = rightChecked,
+                        .right = right_checked,
                     } },
-                    resultType,
+                    result_type,
                     expected,
                     expr.span,
                 );
             },
-            .Not => {
-                const boolExpectation = TypeExpectation{
-                    .typeId = self.typeStore.builtins.Bool,
+            .not => {
+                const bool_exp = TypeExpectation{
+                    .type_id = self.type_store.builtins.bool,
                     .span = null, // NOTE: should this be null?
                     .reason = "logical not requires Bool operand",
                 };
-                const rightChecked = try self.checkExpr(unary.right, boolExpectation);
+                const right_checked = try self.checkExpr(unary.right, bool_exp);
 
-                const resultType = if (rightChecked.typeId == self.typeStore.builtins.Error) self.typeStore.builtins.Error else self.typeStore.builtins.Bool;
+                const result_type = if (right_checked.type_id == self.type_store.builtins.err)
+                    self.type_store.builtins.err
+                else
+                    self.type_store.builtins.bool;
+
                 return try self.typedExpr(
-                    .{ .Unary = .{
+                    .{ .unary = .{
                         .operator = unary.operator,
-                        .right = rightChecked,
+                        .right = right_checked,
                     } },
-                    resultType,
+                    result_type,
                     expected,
                     expr.span,
                 );
@@ -928,41 +963,49 @@ pub const Checker = struct {
     fn typedExpr(
         self: *const Checker,
         data: CheckedExprData,
-        resultType: TypeId,
-        typeExp: ?TypeExpectation,
+        result_type: TypeId,
+        type_exp: ?TypeExpectation,
         span: Span,
     ) !*CheckedExpr {
-        if (typeExp != null and resultType != typeExp.?.typeId and resultType != self.typeStore.builtins.Error and typeExp.?.typeId != self.typeStore.builtins.Error) {
+        if (type_exp != null and
+            result_type != type_exp.?.type_id and
+            result_type != self.type_store.builtins.err and
+            type_exp.?.type_id != self.type_store.builtins.err)
+        {
             var d = DiagnosticBuilder.err(
                 self.ctx,
                 "type mismatch: expected `{s}`, got `{s}`",
                 .{
-                    self.typeStore.formatTypeName(typeExp.?.typeId),
-                    self.typeStore.formatTypeName(resultType),
+                    self.type_store.formatTypeName(type_exp.?.type_id),
+                    self.type_store.formatTypeName(result_type),
                 },
             );
-            _ = d.primaryLabel(span, "this has type `{s}`", .{self.typeStore.formatTypeName(resultType)});
-            if (typeExp.?.span) |expectationSpan| {
-                _ = d.secondaryLabel(expectationSpan, "{s}", .{typeExp.?.reason});
+            _ = d.primaryLabel(
+                span,
+                "this has type `{s}`",
+                .{self.type_store.formatTypeName(result_type)},
+            );
+            if (type_exp.?.span) |expectationSpan| {
+                _ = d.secondaryLabel(expectationSpan, "{s}", .{type_exp.?.reason});
             }
             d.emit();
             // swallow the mismatch, but mark expression as error-typed
             return try self.heapAlloc(CheckedExpr, .{
-                .typeId = self.typeStore.builtins.Error,
+                .type_id = self.type_store.builtins.err,
                 .kind = data,
                 .span = span,
             });
         }
         return try self.heapAlloc(CheckedExpr, .{
-            .typeId = resultType,
+            .type_id = result_type,
             .kind = data,
             .span = span,
         });
     }
 
     fn getNewVarId(self: *Checker) usize {
-        const id = self.nextVarId;
-        self.nextVarId += 1;
+        const id = self.next_var_id;
+        self.next_var_id += 1;
         return id;
     }
     fn currentScope(self: *const Checker) *Scope {
@@ -970,9 +1013,9 @@ pub const Checker = struct {
     }
 
     fn enterNewScope(self: *Checker) !void {
-        const newScope = try self.ctx.allocator.create(Scope);
-        newScope.* = Scope.init(self.ctx.allocator, self.currentScope());
-        try self.scopes.append(self.ctx.allocator, newScope);
+        const new_scope = try self.ctx.allocator.create(Scope);
+        new_scope.* = Scope.init(self.ctx.allocator, self.currentScope());
+        try self.scopes.append(self.ctx.allocator, new_scope);
     }
 
     fn exitScope(self: *Checker) void {
