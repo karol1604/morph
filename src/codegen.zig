@@ -13,12 +13,13 @@ pub const CodeGen = struct {
     target: targ.Target,
     output: std.ArrayList(u8) = .empty,
     ir_gen: *const ir.IRGen,
-    var_to_stack_offset: std.StringHashMap(isize),
+    scratch: ra.ScratchPool = ra.ScratchPool.init(),
+
     current_stack_offset: isize = -8,
     current_frame_size: usize = 0,
     allocations: ?std.HashMap(
         liveness.LivenessKey,
-        ra.Allocation,
+        ra.PhysicalLocation,
         liveness.LivenessKeyContext,
         std.hash_map.default_max_load_percentage,
     ) = null,
@@ -32,7 +33,6 @@ pub const CodeGen = struct {
             .ctx = ctx,
             .target = target,
             .ir_gen = ir_gen,
-            .var_to_stack_offset = std.StringHashMap(isize).init(ctx.allocator), // it should probably be unmanaged
         };
     }
 
@@ -49,33 +49,39 @@ pub const CodeGen = struct {
 
             var reg_alloc = try RegisterAllocator.init(live_intervals, self.ctx.allocator);
 
-            // FIXME: does not work for more than 8 params in the arm64 calling convention,
-            // but we can fix that later
             for (func.params.items, 0..) |param, idx| {
                 const key = liveness.LivenessKey{ .variable = param.toString() };
-                const arg_reg = ra.ARGUMENT_REGISTERS[idx];
-                try reg_alloc.allocations.put(key, .{ .reg = arg_reg });
-
-                for (reg_alloc.available_regs.items, 0..) |reg, i| {
-                    if (reg.name == arg_reg.name) {
-                        _ = reg_alloc.available_regs.orderedRemove(i);
-                        break;
-                    }
-                }
-
-                std.debug.print("******* param {d}: {s} assigned to {s}\n", .{
-                    idx,
-                    param.toString(),
-                    ra.ARGUMENT_REGISTERS[idx].name.toString(),
-                });
-
-                for (live_intervals) |interval| {
-                    if (std.meta.eql(interval.key, key)) {
-                        try reg_alloc.insertSortedByEndIntoActive(interval);
-                        break;
-                    }
-                }
+                try reg_alloc.preAllocate(key, ra.ARGUMENT_REGISTERS[idx]);
             }
+
+            // FIXME: does not work for more than 8 params in the arm64 calling convention,
+            // but we can fix that later
+            // and this code is also horrible
+            // for (func.params.items, 0..) |param, idx| {
+            //     const key = liveness.LivenessKey{ .variable = param.toString() };
+            //     const arg_reg = ra.ARGUMENT_REGISTERS[idx];
+            //     try reg_alloc.allocations.put(key, .{ .reg = arg_reg });
+            //
+            //     for (reg_alloc.available_regs.items, 0..) |reg, i| {
+            //         if (reg.name == arg_reg.name) {
+            //             _ = reg_alloc.available_regs.orderedRemove(i);
+            //             break;
+            //         }
+            //     }
+            //
+            //     std.debug.print("******* param {d}: {s} assigned to {s}\n", .{
+            //         idx,
+            //         param.toString(),
+            //         ra.ARGUMENT_REGISTERS[idx].name.toString(),
+            //     });
+            //
+            //     for (live_intervals) |interval| {
+            //         if (std.meta.eql(interval.key, key)) {
+            //             try reg_alloc.insertSortedByEndIntoActive(interval);
+            //             break;
+            //         }
+            //     }
+            // }
 
             const call_sites = self.findCallSites(func);
 
@@ -106,7 +112,7 @@ pub const CodeGen = struct {
 
             try reg_alloc.allocate();
             self.allocations = reg_alloc.allocations;
-            const frame_size = std.mem.alignForward(usize, reg_alloc.spill * 8 + 16, 16);
+            const frame_size = std.mem.alignForward(usize, reg_alloc.spill_count * 8 + 16, 16);
             reg_alloc.dumpLog();
 
             try self.emitFunction(func, frame_size);
@@ -127,6 +133,45 @@ pub const CodeGen = struct {
         try file.writeStreamingAll(io, self.output.items);
     }
 
+    fn generateFunction(self: *CodeGen, func: ir.IRFunction) !void {
+        const live_intervals = try liveness.analyze(&func, self.ctx.allocator);
+        std.debug.print("Liveness info for function {s}:\n", .{func.name});
+
+        var reg_alloc = try RegisterAllocator.init(live_intervals, self.ctx.allocator);
+
+        for (func.params.items, 0..) |param, idx| {
+            if (idx >= ra.ARGUMENT_REGISTERS.len) {
+                @panic("more than 8 params not yet supported");
+            }
+
+            const key = liveness.LivenessKey{ .variable = param.toString() };
+            try reg_alloc.preAllocate(key, ra.ARGUMENT_REGISTERS[idx]);
+        }
+
+        const call_sites = self.findCallSites(func);
+        for (live_intervals) |interval| {
+            if (reg_alloc.allocations.contains(interval.key)) continue;
+            if (intervalSpansCallSite(interval, call_sites)) {
+                try reg_alloc.hintPreAllocation(interval.key);
+            }
+        }
+
+        try reg_alloc.allocate();
+        reg_alloc.dumpLog();
+
+        const frame_size = std.mem.alignForward(usize, reg_alloc.spill_count * 8 + 16, 16);
+
+        self.allocations = reg_alloc.allocations;
+        self.current_frame_size = frame_size;
+        self.scratch = ra.ScratchPool.init();
+
+        try self.emitFunction(func, frame_size);
+
+        for (live_intervals) |info| {
+            std.debug.print("{f}\n", .{info});
+        }
+    }
+
     fn findCallSites(self: *CodeGen, func: ir.IRFunction) []usize {
         var call_sites: std.ArrayList(usize) = .empty;
         var pos: usize = 0;
@@ -143,6 +188,13 @@ pub const CodeGen = struct {
         }
         return call_sites.toOwnedSlice(self.ctx.allocator) catch
             @panic("failed to create call sites slice");
+    }
+
+    fn intervalSpansCallSite(interval: liveness.LiveInterval, call_sites: []const usize) bool {
+        for (call_sites) |pos| {
+            if (interval.start <= pos and pos <= interval.end) return true;
+        }
+        return false;
     }
 
     fn emitFunction(self: *CodeGen, func: ir.IRFunction, frame_size: usize) !void {
@@ -199,8 +251,33 @@ pub const CodeGen = struct {
         const alloc = self.allocations.?.get(key) orelse @panic("no allocation for operand");
         return switch (alloc) {
             .reg => |reg| reg.name.toString(),
-            .spil => @panic("handle spills separately"),
+            .stack => @panic("handle spills separately"),
         };
+    }
+
+    fn materialize(self: *CodeGen, operand: ir.Operand, dest_reg: ra.RegisterName) !ra.RegisterName {
+        switch (operand.value) {
+            .int => |i| {
+                try self.emit("    mov {s}, #{d}\n", .{ dest_reg.toString(), i });
+                return dest_reg;
+            },
+            .bool => |b| {
+                try self.emit("    mov {s}, #{d}\n", .{ dest_reg.toString(), @intFromBool(b) });
+                return dest_reg;
+            },
+            .variable, .temp => {
+                switch (self.resolve(operand)) {
+                    .reg => |reg| return reg.name, // already in a register, free
+                    .stack => |offset| {
+                        try self.emit("    ldr {s}, [x29, #{d}]\n", .{
+                            dest_reg.toString(), offset,
+                        });
+                        return dest_reg;
+                    },
+                }
+            },
+            else => std.debug.panic("unsupported operand type for materialization {f}", .{operand}),
+        }
     }
 
     fn materializeOperand(self: *CodeGen, operand: ir.Operand, dest_reg: []const u8) ![]const u8 {
@@ -212,7 +289,7 @@ pub const CodeGen = struct {
             .variable, .temp => {
                 switch (self.resolveOperand(operand)) {
                     .reg => |reg| return reg.name.toString(),
-                    .spil => {
+                    .stack => {
                         @panic("handle spills separately");
                         // try self.loadOperand(operand, dest_reg, null, .{});
                         // return dest_reg;
@@ -222,6 +299,7 @@ pub const CodeGen = struct {
             else => @panic("unsupported operand type"),
         }
     }
+
     fn emitInstr(self: *CodeGen, instr: ir.Instr) !void {
         // _ = self;
         // _ = instr;
@@ -230,122 +308,132 @@ pub const CodeGen = struct {
         // TODO: abstract these to functions
         switch (instr) {
             .assign => |op| {
-                const dst = self.resolveRegister(op.target);
+                const d = self.dest(op.target);
+                try self.emit("    ; {f} = {f}\n", .{ op.target, op.value });
                 switch (op.value.value) {
-                    .int => |i| try self.emit(
-                        "    mov {s}, #{d} ; {f} = {f}\n",
-                        .{ dst, i, op.target, op.value },
-                    ),
-                    .bool => |b| try self.emit("    mov {s}, #{d} ; {f} = {f}\n", .{
-                        dst,
-                        @intFromBool(b),
-                        op.target,
-                        op.value,
+                    .int => |i| try self.emit("    mov {s}, #{d}\n", .{ d.reg.toString(), i }),
+                    .bool => |b| try self.emit("    mov {s}, #{d}\n", .{
+                        d.reg.toString(), @intFromBool(b),
                     }),
-                    else => {
-                        const src = self.resolveRegister(op.value);
-                        if (!std.mem.eql(u8, dst, src)) {
-                            try self.emit("    mov {s}, {s}\n", .{ dst, src });
+                    .variable, .temp => {
+                        const s_scratch = self.scratch.borrow();
+                        defer self.scratch.release(s_scratch);
+
+                        const s = try self.materialize(op.value, s_scratch);
+                        if (!std.mem.eql(u8, s.toString(), d.reg.toString())) {
+                            try self.emit("    mov {s}, {s}\n", .{
+                                d.reg.toString(), s.toString(),
+                            });
                         }
+                        if (std.mem.eql(u8, s.toString(), s_scratch.toString())) self.scratch.release(s_scratch);
                     },
+                    else => @panic("assign: unsupported value kind"),
+                }
+                if (d.must_store) {
+                    try self.store(op.target, d.reg);
+                    self.scratch.release(d.reg);
                 }
             },
             .add => |op| {
-                const dst = self.resolveRegister(op.result);
-                const left = try self.materializeOperand(op.left, dst);
+                const d = self.dest(op.result);
+
+                const ls = self.scratch.borrow();
+                defer self.scratch.release(ls);
+
+                const left = try self.materialize(op.left, ls);
 
                 switch (op.right.value) {
-                    .int => |i| try self.emit("    add {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
-                        dst, left, i, op.result, op.left, op.right,
-                    }),
-                    .variable, .temp => {
-                        // const right = self.resolveRegister(op.right);
-
-                        // use x8 as a temporary since it's not an argument register
-                        const right = try self.materializeOperand(op.right, "x8");
-                        try self.emit("    add {s}, {s}, {s} ; {f} = {f} + {f}\n", .{
-                            dst, left, right, op.result, op.left, op.right,
+                    .int => |i| {
+                        try self.emit("    add {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
+                            d.reg.toString(), left.toString(), i,
+                            op.result,        op.left,         op.right,
                         });
                     },
-                    else => @panic("unsupported add operand"),
+                    else => {
+                        const rs = self.scratch.borrow();
+                        defer self.scratch.release(rs);
+
+                        const right = try self.materialize(op.right, rs);
+                        try self.emit("    add {s}, {s}, {s} ; {f} = {f} + {f}\n", .{
+                            d.reg.toString(), left.toString(), right.toString(),
+                            op.result,        op.left,         op.right,
+                        });
+                    },
+                }
+                if (d.must_store) {
+                    try self.store(op.result, d.reg);
+                    self.scratch.release(d.reg);
                 }
             },
             .sub => |op| {
-                const dst = self.resolveRegister(op.result);
-                const left = try self.materializeOperand(op.left, dst);
+                const d = self.dest(op.result);
+
+                const ls = self.scratch.borrow();
+                defer self.scratch.release(ls);
+
+                const left = try self.materialize(op.left, ls);
 
                 switch (op.right.value) {
-                    .int => |i| try self.emit("    sub {s}, {s}, #{d} ; {f} = {f} - {f}\n", .{
-                        dst, left, i, op.result, op.left, op.right,
-                    }),
-                    .variable, .temp => {
-                        // const right = self.resolveRegister(op.right);
-
-                        const right = try self.materializeOperand(op.right, "x8");
-                        try self.emit("    sub {s}, {s}, {s} ; {f} = {f} - {f}\n", .{
-                            dst, left, right, op.result, op.left, op.right,
+                    .int => |i| {
+                        try self.emit("    sub {s}, {s}, #{d} ; {f} = {f} - {f}\n", .{
+                            d.reg.toString(), left.toString(), i,
+                            op.result,        op.left,         op.right,
                         });
                     },
-                    else => @panic("unsupported add operand"),
+                    else => {
+                        const rs = self.scratch.borrow();
+                        defer self.scratch.release(rs);
+
+                        const right = try self.materialize(op.right, rs);
+                        try self.emit("    sub {s}, {s}, {s} ; {f} = {f} - {f}\n", .{
+                            d.reg.toString(), left.toString(), right.toString(),
+                            op.result,        op.left,         op.right,
+                        });
+                    },
+                }
+                if (d.must_store) {
+                    try self.store(op.result, d.reg);
+                    self.scratch.release(d.reg);
                 }
             },
             .mul => |op| {
-                const dst = self.resolveRegister(op.result);
+                const d = self.dest(op.result);
+                const ls = self.scratch.borrow();
+                defer self.scratch.release(ls);
+                const rs = self.scratch.borrow();
+                defer self.scratch.release(rs);
 
-                const left = try self.materializeOperand(op.left, "x8");
-                const right = try self.materializeOperand(op.right, "x9");
+                const left = try self.materialize(op.left, ls);
+                const right = try self.materialize(op.right, rs);
 
-                // self.storeVariable(, src_reg: []const u8)
+                try self.emit("    mul {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
+                    d.reg.toString(), left.toString(), right.toString(),
+                    op.result,        op.left,         op.right,
+                });
 
-                try self.emit(
-                    "    mul {s}, {s}, {s} ; {f} = {f} * {f}\n",
-                    .{ dst, left, right, op.result, op.left, op.right },
-                );
-
-                // switch (op.right.value) {
-                //     .int => |i| {
-                //         // mul has no immediate form, must use a scratch register
-                //         try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
-                //         try self.emit("    mul {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
-                //             dst, left, op.result, op.left, op.right,
-                //         });
-                //     },
-                //     .variable, .temp => {
-                //         const right = self.resolveRegister(op.right);
-                //         try self.emit("    mul {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
-                //             dst, left, right, op.result, op.left, op.right,
-                //         });
-                //     },
-                //     else => @panic("unsupported mul operand"),
-                // }
+                if (d.must_store) {
+                    try self.store(op.result, d.reg);
+                    self.scratch.release(d.reg);
+                }
             },
             .div => |op| {
-                const dst = self.resolveRegister(op.result);
+                const d = self.dest(op.result);
+                const ls = self.scratch.borrow();
+                defer self.scratch.release(ls);
 
-                const left = try self.materializeOperand(op.left, "x8");
-                const right = try self.materializeOperand(op.right, "x9");
+                const rs = self.scratch.borrow();
+                defer self.scratch.release(rs);
 
-                try self.emit(
-                    "    sdiv {s}, {s}, {s} ; {f} = {f} / {f}\n",
-                    .{ dst, left, right, op.result, op.left, op.right },
-                );
-
-                // switch (op.right.value) {
-                //     .int => |i| {
-                //         // mul has no immediate form, must use a scratch register
-                //         try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
-                //         try self.emit("    sdiv {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
-                //             dst, left, op.result, op.left, op.right,
-                //         });
-                //     },
-                //     .variable, .temp => {
-                //         const right = self.resolveRegister(op.right);
-                //         try self.emit("    sdiv {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
-                //             dst, left, right, op.result, op.left, op.right,
-                //         });
-                //     },
-                //     else => @panic("unsupported mul operand"),
-                // }
+                const left = try self.materialize(op.left, ls);
+                const right = try self.materialize(op.right, rs);
+                try self.emit("    sdiv {s}, {s}, {s} ; {f} = {f} / {f}\n", .{
+                    d.reg.toString(), left.toString(), right.toString(),
+                    op.result,        op.left,         op.right,
+                });
+                if (d.must_store) {
+                    try self.store(op.result, d.reg);
+                    self.scratch.release(d.reg);
+                }
             },
             .call => |op| {
                 try self.emit(
@@ -385,7 +473,7 @@ pub const CodeGen = struct {
         try self.storeVariable(result, "x0");
     }
 
-    fn resolveOperand(self: *CodeGen, operand: ir.Operand) ra.Allocation {
+    fn resolveOperand(self: *CodeGen, operand: ir.Operand) ra.PhysicalLocation {
         const key: liveness.LivenessKey = switch (operand.value) {
             .variable => |name| liveness.LivenessKey{ .variable = name },
             .temp => |id| liveness.LivenessKey{ .temp = id },
@@ -393,6 +481,22 @@ pub const CodeGen = struct {
         };
 
         return self.allocations.?.get(key) orelse @panic("No allocation found for operand");
+    }
+
+    fn resolve(self: *const CodeGen, operand: ir.Operand) ra.PhysicalLocation {
+        const key: liveness.LivenessKey = switch (operand.value) {
+            .temp => |id| .{ .temp = id },
+            .variable => |name| .{ .variable = name },
+            else => std.debug.panic(
+                "resolve: operand {f} has no allocation key\n",
+                .{operand},
+            ),
+        };
+
+        return self.allocations.?.get(key) orelse std.debug.panic(
+            "resolve: no allocation for {f}\n",
+            .{operand},
+        );
     }
 
     fn loadOperand(
@@ -424,9 +528,9 @@ pub const CodeGen = struct {
                             try self.emit("\n", .{});
                         }
                     },
-                    .spil => |slot| {
-                        const offset = CodeGen.spillSlotOffset(slot);
-                        try self.emit("    ldr {s}, [x29, #-{d}] ; load spilled value\n", .{
+                    .stack => |offset| {
+                        // const offset = CodeGen.spillSlotOffset(slot);
+                        try self.emit("    ldr {s}, [x29, #{d}] ; load spilled value\n", .{
                             dest_reg,
                             offset,
                         });
@@ -441,9 +545,10 @@ pub const CodeGen = struct {
             else => @panic("Unsupported operand type"),
         }
     }
-    fn spillSlotOffset(slot: usize) usize {
-        return (slot + 1) * 8;
-    }
+
+    // fn spillSlotOffset(slot: usize) usize {
+    //     return (slot + 1) * 8;
+    // }
 
     fn emitTerminator(self: *CodeGen, term: ir.Terminator, func_name: []const u8) !void {
         switch (term) {
@@ -514,13 +619,39 @@ pub const CodeGen = struct {
                     try self.emit("    mov {s}, {s}\n", .{ reg.name.toString(), src_reg });
                 }
             },
-            .spil => |slot| {
-                const offset = CodeGen.spillSlotOffset(slot);
+            .stack => |offset| {
+                // const offset = CodeGen.spillSlotOffset(slot);
                 try self.emit(
-                    "    str {s}, [x29, #-{d}] ; store spilled value\n",
+                    "    str {s}, [x29, #{d}] ; store spilled value\n",
                     .{ src_reg, offset },
                 );
             },
+        }
+    }
+
+    fn store(self: *CodeGen, result: ir.Operand, src_reg: ra.RegisterName) !void {
+        switch (self.resolve(result)) {
+            .reg => |reg| {
+                if (!std.mem.eql(u8, reg.name.toString(), src_reg.toString())) {
+                    try self.emit("    mov {s}, {s}\n", .{
+                        reg.name.toString(), src_reg.toString(),
+                    });
+                }
+            },
+            .stack => |offset| {
+                try self.emit("    str {s}, [x29, #{d}]\n", .{
+                    src_reg.toString(), offset,
+                });
+            },
+        }
+    }
+
+    const DestResult = struct { reg: ra.RegisterName, must_store: bool };
+
+    fn dest(self: *CodeGen, result: ir.Operand) DestResult {
+        switch (self.resolve(result)) {
+            .reg => |reg| return .{ .reg = reg.name, .must_store = false },
+            .stack => return .{ .reg = self.scratch.borrow(), .must_store = true },
         }
     }
 };

@@ -1,4 +1,3 @@
-add : Int × Int -> Int
-add a b => a + b
-
-add(34, 35)
+let a = 2
+let b = 3
+a + 1 + 2 * (12 - 3) / 6 + 2 - b
