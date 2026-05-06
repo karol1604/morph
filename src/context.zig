@@ -31,7 +31,9 @@ pub const CompilerContext = struct {
         self.type_store = type_store;
     }
 
-    pub fn getTypeStore(self: *const CompilerContext) *const TypeStore {
+    /// Unwraps the type store, panicking if it's not attached
+    /// SAFETY: caller must ensure type store is attached before calling
+    pub fn typeStore(self: *const CompilerContext) *const TypeStore {
         return self.type_store orelse
             std.debug.panic("Type store not attached to compiler context", .{});
     }

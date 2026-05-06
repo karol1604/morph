@@ -7,7 +7,7 @@ const ast = @import("../ast.zig");
 
 // Helper to setup parser and parse a single expression
 fn parse(arena: *std.heap.ArenaAllocator, source: []const u8) !*ast.Expr {
-    const ctx = context.CompilerContext.init(arena, source);
+    const ctx = context.CompilerContext.init(arena, source, "test.mp");
     // Note: In real code, ensure ctx pointer logic is safe.
     // Here we rely on arena to keep memory alive, but ctx is on stack.
     // For tests this is usually fine if parser/lexer don't store &ctx permanently

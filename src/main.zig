@@ -27,6 +27,7 @@ fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
 
 pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const alloc = arena.allocator();
     // const source = "ℕ";
     // const source = "let ℕ = a != true;";
     // const source = "let x ∈ Vec3 = { let a = 1; };";
@@ -39,12 +40,43 @@ pub fn main(init: std.process.Init) !void {
     //     \\add(x, y) => x + y;;
     // ;
     const io = init.io;
-    const source = @embedFile("tests/test.mp");
+    // const source = @embedFile("tests/test.mp");
+
+    var args = try init.minimal.args.iterateAllocator(arena.allocator());
+
+    _ = args.next(); // skip program name
+
+    const path = args.next() orelse {
+        std.debug.print("Usage: program <path>\n", .{});
+        return;
+    };
+
+    var source: ?[]const u8 = null;
+
+    if (std.Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only })) |file| {
+        defer file.close(io);
+
+        const buf = try alloc.alloc(u8, try file.length(io));
+
+        var reader = file.reader(io, buf);
+        reader.interface.readSliceAll(buf) catch |err| switch (err) {
+            error.ReadFailed => return reader.err.?,
+            else => return err,
+        };
+
+        source = buf;
+    } else |err| switch (err) {
+        error.FileNotFound, error.AccessDenied => {
+            std.debug.print("cannot open file: {}\n", .{err});
+        },
+        else => return err,
+    }
 
     // add : ℕ × ℕ -> ℕ;
     // add(x, y) => x + y;
 
-    var ctx = context.CompilerContext.init(&arena, source, "test.mp");
+    // unsafe unwrap here
+    var ctx = context.CompilerContext.init(&arena, source.?, "test.mp");
     defer ctx.deinit();
 
     var lex = lexer.Lexer.init(&ctx) catch return error.LexerInitFailed;

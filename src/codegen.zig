@@ -203,6 +203,25 @@ pub const CodeGen = struct {
         };
     }
 
+    fn materializeOperand(self: *CodeGen, operand: ir.Operand, dest_reg: []const u8) ![]const u8 {
+        switch (operand.value) {
+            .int, .bool => {
+                try self.loadOperand(operand, dest_reg, null, .{});
+                return dest_reg;
+            },
+            .variable, .temp => {
+                switch (self.resolveOperand(operand)) {
+                    .reg => |reg| return reg.name.toString(),
+                    .spil => {
+                        @panic("handle spills separately");
+                        // try self.loadOperand(operand, dest_reg, null, .{});
+                        // return dest_reg;
+                    },
+                }
+            },
+            else => @panic("unsupported operand type"),
+        }
+    }
     fn emitInstr(self: *CodeGen, instr: ir.Instr) !void {
         // _ = self;
         // _ = instr;
@@ -233,13 +252,17 @@ pub const CodeGen = struct {
             },
             .add => |op| {
                 const dst = self.resolveRegister(op.result);
-                const left = self.resolveRegister(op.left);
+                const left = try self.materializeOperand(op.left, dst);
+
                 switch (op.right.value) {
                     .int => |i| try self.emit("    add {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
                         dst, left, i, op.result, op.left, op.right,
                     }),
                     .variable, .temp => {
-                        const right = self.resolveRegister(op.right);
+                        // const right = self.resolveRegister(op.right);
+
+                        // use x8 as a temporary since it's not an argument register
+                        const right = try self.materializeOperand(op.right, "x8");
                         try self.emit("    add {s}, {s}, {s} ; {f} = {f} + {f}\n", .{
                             dst, left, right, op.result, op.left, op.right,
                         });
@@ -249,14 +272,17 @@ pub const CodeGen = struct {
             },
             .sub => |op| {
                 const dst = self.resolveRegister(op.result);
-                const left = self.resolveRegister(op.left);
+                const left = try self.materializeOperand(op.left, dst);
+
                 switch (op.right.value) {
-                    .int => |i| try self.emit("    sub {s}, {s}, #{d} ; {f} = {f} + {f}\n", .{
+                    .int => |i| try self.emit("    sub {s}, {s}, #{d} ; {f} = {f} - {f}\n", .{
                         dst, left, i, op.result, op.left, op.right,
                     }),
                     .variable, .temp => {
-                        const right = self.resolveRegister(op.right);
-                        try self.emit("    sub {s}, {s}, {s} ; {f} = {f} + {f}\n", .{
+                        // const right = self.resolveRegister(op.right);
+
+                        const right = try self.materializeOperand(op.right, "x8");
+                        try self.emit("    sub {s}, {s}, {s} ; {f} = {f} - {f}\n", .{
                             dst, left, right, op.result, op.left, op.right,
                         });
                     },
@@ -265,45 +291,61 @@ pub const CodeGen = struct {
             },
             .mul => |op| {
                 const dst = self.resolveRegister(op.result);
-                const left = self.resolveRegister(op.left);
 
-                switch (op.right.value) {
-                    .int => |i| {
-                        // mul has no immediate form, must use a scratch register
-                        try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
-                        try self.emit("    mul {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
-                            dst, left, op.result, op.left, op.right,
-                        });
-                    },
-                    .variable, .temp => {
-                        const right = self.resolveRegister(op.right);
-                        try self.emit("    mul {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
-                            dst, left, right, op.result, op.left, op.right,
-                        });
-                    },
-                    else => @panic("unsupported mul operand"),
-                }
+                const left = try self.materializeOperand(op.left, "x8");
+                const right = try self.materializeOperand(op.right, "x9");
+
+                // self.storeVariable(, src_reg: []const u8)
+
+                try self.emit(
+                    "    mul {s}, {s}, {s} ; {f} = {f} * {f}\n",
+                    .{ dst, left, right, op.result, op.left, op.right },
+                );
+
+                // switch (op.right.value) {
+                //     .int => |i| {
+                //         // mul has no immediate form, must use a scratch register
+                //         try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
+                //         try self.emit("    mul {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
+                //             dst, left, op.result, op.left, op.right,
+                //         });
+                //     },
+                //     .variable, .temp => {
+                //         const right = self.resolveRegister(op.right);
+                //         try self.emit("    mul {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
+                //             dst, left, right, op.result, op.left, op.right,
+                //         });
+                //     },
+                //     else => @panic("unsupported mul operand"),
+                // }
             },
             .div => |op| {
                 const dst = self.resolveRegister(op.result);
-                const left = self.resolveRegister(op.left);
 
-                switch (op.right.value) {
-                    .int => |i| {
-                        // mul has no immediate form, must use a scratch register
-                        try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
-                        try self.emit("    sdiv {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
-                            dst, left, op.result, op.left, op.right,
-                        });
-                    },
-                    .variable, .temp => {
-                        const right = self.resolveRegister(op.right);
-                        try self.emit("    sdiv {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
-                            dst, left, right, op.result, op.left, op.right,
-                        });
-                    },
-                    else => @panic("unsupported mul operand"),
-                }
+                const left = try self.materializeOperand(op.left, "x8");
+                const right = try self.materializeOperand(op.right, "x9");
+
+                try self.emit(
+                    "    sdiv {s}, {s}, {s} ; {f} = {f} / {f}\n",
+                    .{ dst, left, right, op.result, op.left, op.right },
+                );
+
+                // switch (op.right.value) {
+                //     .int => |i| {
+                //         // mul has no immediate form, must use a scratch register
+                //         try self.emit("    mov x8, #{d}\n", .{i}); // NOTE: i think we can use x8 as a temporary since it's not an argument register
+                //         try self.emit("    sdiv {s}, {s}, x8 ; {f} = {f} * {f}\n", .{
+                //             dst, left, op.result, op.left, op.right,
+                //         });
+                //     },
+                //     .variable, .temp => {
+                //         const right = self.resolveRegister(op.right);
+                //         try self.emit("    sdiv {s}, {s}, {s} ; {f} = {f} * {f}\n", .{
+                //             dst, left, right, op.result, op.left, op.right,
+                //         });
+                //     },
+                //     else => @panic("unsupported mul operand"),
+                // }
             },
             .call => |op| {
                 try self.emit(

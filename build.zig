@@ -109,14 +109,32 @@ pub fn build(b: *std.Build) void {
         .root_module = exe.root_module,
     });
 
+    const e2e_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/e2e/runner.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
+    const run_e2e_tests = b.addRunArtifact(e2e_tests);
+
+    // const install_exe = b.addInstallArtifact(exe, .{});
+    run_e2e_tests.step.dependOn(&exe.step);
+
+    const options = b.addOptions();
+    options.addOption([]const u8, "compiler_path", b.getInstallPath(.bin, "morph"));
+    e2e_tests.root_module.addOptions("build_options", options);
 
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
+
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_e2e_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

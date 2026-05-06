@@ -88,7 +88,6 @@ pub const BasicBlock = struct {
 
 pub const IRFunction = struct {
     name: []const u8,
-    // id: usize,
     params: std.ArrayList(Operand) = .empty,
     blocks: std.ArrayList(BasicBlock) = .empty,
     entry_block_id: usize,
@@ -257,17 +256,17 @@ pub const IRGen = struct {
             }
 
             const last = try self.genExpr(exprs[exprs.len - 1]);
-            if (last.type_id == self.ctx.getTypeStore().builtins.int or
-                last.type_id == self.ctx.getTypeStore().builtins.bool) break :blk last;
+            if (last.type_id == self.ctx.typeStore().builtins.int or
+                last.type_id == self.ctx.typeStore().builtins.bool) break :blk last;
 
             // NOTE: for now, we accept Bool as exit code (false: 0, true: 1)
             break :blk Operand{
                 .value = .{ .int = 0 },
-                .type_id = self.ctx.getTypeStore().builtins.int,
+                .type_id = self.ctx.typeStore().builtins.int,
             };
         } else Operand{
             .value = .{ .int = 0 },
-            .type_id = self.ctx.getTypeStore().builtins.int,
+            .type_id = self.ctx.typeStore().builtins.int,
         };
 
         self.setTerminator(.{ .exit = exit_code });
@@ -291,7 +290,6 @@ pub const IRGen = struct {
 
         const func = IRFunction{
             .name = func_name,
-            // .id = id,
             .entry_block_id = self.next_block_idx,
         };
         try self.functions.append(self.ctx.allocator, func);
@@ -353,19 +351,16 @@ pub const IRGen = struct {
         return null;
     }
 
+    // TODO: too long, split into multiple functions
     fn genExpr(self: *IRGen, expr: *const checked_ast.CheckedExpr) !Operand {
         switch (expr.kind) {
-            .int_literal => |v| {
-                return Operand{
-                    .value = .{ .int = v },
-                    .type_id = self.ctx.getTypeStore().builtins.int,
-                };
+            .int_literal => |v| return Operand{
+                .value = .{ .int = v },
+                .type_id = self.ctx.typeStore().builtins.int,
             },
-            .bool_literal => |v| {
-                return Operand{
-                    .value = .{ .bool = v },
-                    .type_id = self.ctx.getTypeStore().builtins.bool,
-                };
+            .bool_literal => |v| return Operand{
+                .value = .{ .bool = v },
+                .type_id = self.ctx.typeStore().builtins.bool,
             },
             .identifier => |ident| {
                 const v = self.lookupVariable(ident.name, ident.id) orelse return error.UndefinedVariable;
@@ -374,11 +369,9 @@ pub const IRGen = struct {
                     .type_id = v.type_id,
                 };
             },
-            .unit_literal => {
-                return Operand{
-                    .value = .unit,
-                    .type_id = self.ctx.getTypeStore().builtins.unit,
-                };
+            .unit_literal => return Operand{
+                .value = .unit,
+                .type_id = self.ctx.typeStore().builtins.unit,
             },
             .unary => |un| {
                 const right_op = try self.genExpr(un.right);
@@ -400,7 +393,6 @@ pub const IRGen = struct {
                     else => return error.IRUnimplementedOperator,
                 }
 
-                // try self.instructions.append(self.ctx.allocator, instr);
                 try self.emit(instr);
                 return result_op;
             },
@@ -416,7 +408,7 @@ pub const IRGen = struct {
                     .plus, .minus, .multiply, .divide => {
                         result_op = Operand{
                             .value = .{ .temp = result_temp_id },
-                            .type_id = self.ctx.getTypeStore().builtins.int,
+                            .type_id = self.ctx.typeStore().builtins.int,
                         };
 
                         if (bin.operator == .plus) instr = Instr{ .add = .{
@@ -450,7 +442,7 @@ pub const IRGen = struct {
                     => {
                         result_op = Operand{
                             .value = .{ .temp = result_temp_id },
-                            .type_id = self.ctx.getTypeStore().builtins.bool,
+                            .type_id = self.ctx.typeStore().builtins.bool,
                         };
 
                         if (bin.operator == .equal) instr = Instr{
@@ -499,7 +491,6 @@ pub const IRGen = struct {
                     else => return error.IRUnimplementedOperator,
                 }
 
-                // try self.instructions.append(self.ctx.allocator, instr);
                 try self.emit(instr);
                 return result_op;
             },
@@ -514,7 +505,7 @@ pub const IRGen = struct {
                 }
                 return Operand{
                     .value = .unit,
-                    .type_id = self.ctx.getTypeStore().builtins.unit,
+                    .type_id = self.ctx.typeStore().builtins.unit,
                 };
             },
             .variable_decl => |decl| { // TODO: finish
@@ -545,7 +536,7 @@ pub const IRGen = struct {
 
                 return Operand{
                     .value = .unit,
-                    .type_id = self.ctx.getTypeStore().builtins.unit,
+                    .type_id = self.ctx.typeStore().builtins.unit,
                 };
             },
             .func_decl => |func| {
@@ -586,10 +577,10 @@ pub const IRGen = struct {
                     .type_id = expr.type_id, // NOTE: is this correct?
                 };
             },
-            // NOTE: noop
+            // noop
             .func_type_signature => return Operand{
                 .value = .unit,
-                .type_id = self.ctx.getTypeStore().builtins.unit,
+                .type_id = self.ctx.typeStore().builtins.unit,
             },
             .func_call => |call| {
                 var arg_ops: std.ArrayList(Operand) = .empty;
@@ -662,7 +653,6 @@ pub const IRGen = struct {
                     self.setTerminator(.{ .jump = merge_block_id });
                 }
 
-                // 7. continue in merge block
                 try self.switchToBlock(merge_block_id);
 
                 if (i.else_branch) |_| {
@@ -670,7 +660,7 @@ pub const IRGen = struct {
                 }
                 return Operand{
                     .value = .unit,
-                    .type_id = self.ctx.getTypeStore().builtins.unit,
+                    .type_id = self.ctx.typeStore().builtins.unit,
                 };
             },
             // else => return error.Unimplemented,
@@ -686,7 +676,7 @@ pub const IRGen = struct {
     pub fn dump(self: *const IRGen) void {
         std.debug.print("=== IR DUMP ===\n", .{});
         for (self.functions.items) |func| {
-            dumpFunction(func, self.ctx.getTypeStore());
+            dumpFunction(func, self.ctx.typeStore());
             std.debug.print("\n", .{});
         }
     }
