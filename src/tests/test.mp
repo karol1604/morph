@@ -1,3 +1,10 @@
-let a = 2
-let b = 3
-a + 1 + 2 * (12 - 3) / 6 + 2 - b
+add : Int × Int -> Int
+add x y => x + y
+
+fib : Int -> Int
+fib n => {
+  if n <= 1 then n
+  else add(fib(n - 1), fib (n - 2))
+}
+
+fib(10)

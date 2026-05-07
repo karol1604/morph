@@ -8,12 +8,13 @@ const Case = struct {
 };
 
 const cases = [_]Case{
-    .{ .source = "tests/e2e/cases/empty.mp", .expected_exit = 0 },
-    .{ .source = "tests/e2e/cases/exit_constant.mp", .expected_exit = 69 },
-    .{ .source = "tests/e2e/cases/basic_arithmetic.mp", .expected_exit = 6 },
-    .{ .source = "tests/e2e/cases/simple_function_call.mp", .expected_exit = 69 },
-    .{ .source = "tests/e2e/cases/variable_assignment.mp", .expected_exit = 12 },
-    .{ .source = "tests/e2e/cases/if_true.mp", .expected_exit = 0 },
+    .{ .source = "tests/e2e/cases/001-empty.mp", .expected_exit = 0 },
+    .{ .source = "tests/e2e/cases/002-exit_constant.mp", .expected_exit = 69 },
+    .{ .source = "tests/e2e/cases/003-basic_arithmetic.mp", .expected_exit = 9 },
+    .{ .source = "tests/e2e/cases/004-simple_function_call.mp", .expected_exit = 69 },
+    .{ .source = "tests/e2e/cases/005-variable_assignment.mp", .expected_exit = 12 },
+    .{ .source = "tests/e2e/cases/006-if_true.mp", .expected_exit = 0 },
+    .{ .source = "tests/e2e/cases/007-fib.mp", .expected_exit = 55 },
 };
 
 test "e2e test suite" {
@@ -29,7 +30,6 @@ test "e2e test suite" {
         const compile = try std.process.run(allocator, io, .{
             .argv = &.{ compiler_path, case.source },
         });
-        // try std.testing.expectEqual(0, compile.term.exited);
 
         if (std.meta.activeTag(compile.term) != .exited) {
             std.debug.print("\nFAIL (compile) {s}: process did not exit\n", .{case.source});

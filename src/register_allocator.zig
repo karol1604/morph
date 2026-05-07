@@ -70,7 +70,7 @@ pub const ALLOCATABLE = [_]Register{
     .{ .name = .x28, .kind = .callee_saved },
 };
 
-pub const SCRATCH_REGISTERS = [_]RegisterName{ .x8, .x9, .x16, .x17 };
+pub const SCRATCH_REGISTERS = [_]RegisterName{ .x8, .x16, .x17 };
 
 pub const ScratchPool = struct {
     available: [SCRATCH_REGISTERS.len]bool,
@@ -190,7 +190,8 @@ pub const RegisterAllocator = struct {
         });
 
         for (self.intervals) |interval| {
-            if (std.meta.eql(interval.key, key)) {
+            const key_ctx = liveness.LivenessKeyContext{};
+            if (key_ctx.eql(interval.key, key)) {
                 try self.insertSortedByEndIntoActive(interval);
                 break;
             }
@@ -204,7 +205,8 @@ pub const RegisterAllocator = struct {
                 _ = self.available_regs.orderedRemove(i);
                 try self.allocations.put(key, .{ .reg = reg });
                 for (self.intervals) |interval| {
-                    if (std.meta.eql(interval.key, key)) {
+                    const key_ctx = liveness.LivenessKeyContext{};
+                    if (key_ctx.eql(interval.key, key)) {
                         try self.insertSortedByEndIntoActive(interval);
                         return;
                     }
@@ -212,6 +214,28 @@ pub const RegisterAllocator = struct {
                 return;
             }
         }
+    }
+
+    pub fn collectCalleeSaved(self: *RegisterAllocator, alloc: std.mem.Allocator) ![]const Register {
+        var callee_saved: std.ArrayList(Register) = .empty;
+        var it = self.allocations.valueIterator();
+
+        while (it.next()) |loc| {
+            switch (loc.*) {
+                .reg => |reg| {
+                    if (reg.kind == .callee_saved) {
+                        for (callee_saved.items) |r| {
+                            if (r.name == reg.name) break;
+                        } else {
+                            try callee_saved.append(alloc, reg);
+                        }
+                    }
+                },
+                .stack => {},
+            }
+        }
+
+        return try callee_saved.toOwnedSlice(alloc);
     }
 
     pub fn dumpLog(self: *RegisterAllocator) void {
