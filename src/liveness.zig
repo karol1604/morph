@@ -203,6 +203,7 @@ fn instrInputsAndOutput(instr: ir.Instr) InstrOperands {
         .gt_eq => |op| .{ .inputs = .{ op.left, op.right }, .output = op.result },
         .assign => |op| .{ .inputs = .{ op.value, null }, .output = op.target },
         .unary_minus => |op| .{ .inputs = .{ op.operand, null }, .output = op.result },
+        .unary_not => |op| .{ .inputs = .{ op.operand, null }, .output = op.result },
         .call => unreachable, // handled separately
     };
 }

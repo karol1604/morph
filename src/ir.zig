@@ -125,6 +125,10 @@ pub const Instr = union(enum) {
         result: Operand,
         operand: Operand,
     },
+    unary_not: struct {
+        result: Operand,
+        operand: Operand,
+    },
     eq: struct {
         result: Operand,
         left: Operand,
@@ -185,6 +189,10 @@ pub const Instr = union(enum) {
             ),
             .unary_minus => |u| try writer.print(
                 "{f} := -{f}\n",
+                .{ u.result, u.operand },
+            ),
+            .unary_not => |u| try writer.print(
+                "{f} := !{f}\n",
                 .{ u.result, u.operand },
             ),
             .assign => |a| try writer.print(
@@ -386,6 +394,12 @@ pub const IRGen = struct {
                 switch (un.operator) {
                     .minus => {
                         instr = Instr{ .unary_minus = .{
+                            .result = result_op,
+                            .operand = right_op,
+                        } };
+                    },
+                    .not => {
+                        instr = Instr{ .unary_not = .{
                             .result = result_op,
                             .operand = right_op,
                         } };
@@ -769,6 +783,11 @@ pub const IRGen = struct {
             .unary_minus => |x| {
                 dumpOperand(x.result, ts);
                 std.debug.print(" := -", .{});
+                dumpOperand(x.operand, ts);
+            },
+            .unary_not => |x| {
+                dumpOperand(x.result, ts);
+                std.debug.print(" := !", .{});
                 dumpOperand(x.operand, ts);
             },
             .assign => |x| {

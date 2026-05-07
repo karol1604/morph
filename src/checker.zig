@@ -1,12 +1,12 @@
 const std = @import("std");
-const cheked_ast = @import("checked_ast.zig");
+const checked_ast = @import("checked_ast.zig");
 const ast = @import("ast.zig");
 const span_ = @import("span.zig");
 const context = @import("context.zig");
 const type_store = @import("type_store.zig");
 
-const CheckedExpr = cheked_ast.CheckedExpr;
-const CheckedExprData = cheked_ast.CheckedExprKind;
+const CheckedExpr = checked_ast.CheckedExpr;
+const CheckedExprData = checked_ast.CheckedExprKind;
 const TypeId = type_store.TypeId;
 const TypeStore = type_store.TypeStore;
 const Span = span_.Span;
@@ -364,7 +364,7 @@ pub const Checker = struct {
             }
         }
 
-        var checked_params: std.ArrayList(cheked_ast.Param) = .empty;
+        var checked_params: std.ArrayList(checked_ast.Param) = .empty;
 
         if (func_sig == null) {
             var d = DiagnosticBuilder.err(

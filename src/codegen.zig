@@ -433,6 +433,21 @@ pub const CodeGen = struct {
                     self.scratch.release(d.reg);
                 }
             },
+            .unary_not => |op| {
+                const d = self.dest(op.result);
+                const os = self.scratch.borrow();
+                defer self.scratch.release(os);
+
+                const operand = try self.materialize(op.operand, os);
+                try self.emit("    eor {s}, {s}, #1\n", .{
+                    d.reg.toString(), operand.toString(),
+                });
+
+                if (d.must_store) {
+                    try self.store(op.result, d.reg);
+                    self.scratch.release(d.reg);
+                }
+            },
             .call => |op| {
                 try self.emit(
                     "    ; call {s}({d} args)[{f}]\n",
@@ -460,6 +475,7 @@ pub const CodeGen = struct {
                 //         });
                 //     }
                 // }
+
                 try self.emitCallArgs(op.args);
 
                 try self.emit("    bl {s}\n", .{op.callee});
@@ -471,6 +487,10 @@ pub const CodeGen = struct {
             .lt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "le"),
             .gt => |op| try self.emitCondition(op.result, op.left, op.right, "gt"),
             .gt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "ge"),
+            // .unary_not => |op| try self.emitCondition(op.result, op.operand, ir.Operand{
+            //     .value = .{ .int = 0 },
+            //     .type_id = self.ctx.typeStore().builtins.int,
+            // }, "eq"),
 
             // else => @panic("Unsupported instruction type"),
         }
@@ -521,6 +541,7 @@ pub const CodeGen = struct {
         while (moves.items.len > 0) {
             var progress = false;
 
+            // try to find a move that can be safely emitted without clobbering any sources
             var i: usize = 0;
             while (i < moves.items.len) : (i += 1) {
                 const move = moves.items[i];
@@ -535,7 +556,7 @@ pub const CodeGen = struct {
                 }
             }
 
-            if (progress) continue;
+            if (progress) continue; // reordering moves worked, no need for a temp
 
             // we have a cycle, we need to break it with a temp register
             const tmp = maybe_tmp orelse blk: {
@@ -558,10 +579,13 @@ pub const CodeGen = struct {
             }
         }
     }
+
     fn emitCallArgs(self: *CodeGen, args: []const ir.Operand) !void {
         var reg_moves: std.ArrayList(RegMove) = .empty;
         var delayed_args: std.ArrayList(DelayedArg) = .empty;
 
+        // first pass: determine which arguments can be moved directly
+        // and which need to be delayed (immediates and stack values)
         for (args, 0..) |arg, idx| {
             const dst = ra.ARGUMENT_REGISTERS[idx].name;
 
@@ -597,8 +621,10 @@ pub const CodeGen = struct {
             }
         }
 
+        // second pass: emit register moves in an order that avoids clobbering sources (might add a temp)
         try self.emitParallelRegMoves(reg_moves.items);
 
+        // finally: emit delayed arguments which we couldn't move in the first pass
         for (delayed_args.items) |arg| {
             switch (arg) {
                 .int => |a| try self.emit("    mov {s}, #{d}\n", .{ a.dst.toString(), a.value }),

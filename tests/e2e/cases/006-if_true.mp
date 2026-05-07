@@ -1,6 +1,4 @@
-let x = 34 + 33
-
-if x == 67 then
+if true then
     0
 else
     1
