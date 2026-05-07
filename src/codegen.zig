@@ -79,6 +79,7 @@ pub const CodeGen = struct {
 
         const call_sites = self.findCallSites(func);
 
+        // pre-allocate parameter registers
         for (func.params.items, 0..) |param, idx| {
             if (idx >= ra.ARGUMENT_REGISTERS.len) {
                 @panic("more than 8 params not yet supported");
@@ -88,14 +89,16 @@ pub const CodeGen = struct {
 
             if (findInterval(live_intervals, key)) |interval| {
                 if (intervalSpansCallSite(interval, call_sites)) {
+                    // if a parameter is live across a call site, we need to ensure it gets a callee-saved register,
+                    // otherwise it might get overwritten by the callee
                     try reg_alloc.hintCalleeSaved(key);
                 } else {
+                    // otherwise, we can pre-allocate it to the argument register
                     try reg_alloc.preAllocate(key, ra.ARGUMENT_REGISTERS[idx]);
                 }
             }
         }
 
-        // const call_sites = self.findCallSites(func);
         for (live_intervals) |interval| {
             if (reg_alloc.allocations.contains(interval.key)) continue;
             if (intervalSpansCallSite(interval, call_sites)) {
@@ -167,6 +170,7 @@ pub const CodeGen = struct {
         return false;
     }
 
+    /// Emit code to move parameters from their argument registers to their allocated homes (register or stack).
     fn emitParamHomes(self: *CodeGen, func: ir.IRFunction) !void {
         for (func.params.items, 0..) |param, idx| {
             if (idx >= ra.ARGUMENT_REGISTERS.len) {
@@ -215,6 +219,12 @@ pub const CodeGen = struct {
         self.current_frame_size = frame_size;
         try self.emitPrologue(self.current_frame_size, self.current_callee_saved);
 
+        // we do this before emitting the entry block to ensure parameters are in their homes
+        // before any instructions use them
+        // this is to prevent params that live across call sites from being clobbered by the callee
+        // for example if param `x` lives across a `foo(x)` recursive function call,
+        // it enters the function in x0, but if we don't move it to its home (e.g. x19) before the call,
+        // the recursive call will overwrite x0 and clobber `x`'s value
         try self.emitParamHomes(func);
 
         for (func.blocks.items, 0..) |block, i| {
@@ -223,7 +233,12 @@ pub const CodeGen = struct {
         try self.emit("\n", .{});
     }
 
-    fn emitBlock(self: *CodeGen, block: ir.BasicBlock, func_name: []const u8, is_entry: bool) !void {
+    fn emitBlock(
+        self: *CodeGen,
+        block: ir.BasicBlock,
+        func_name: []const u8,
+        is_entry: bool,
+    ) !void {
         if (!is_entry) try self.emit("block_{s}_{d}:\n", .{ func_name, block.id });
         for (block.instructions.items) |instr| {
             try self.emitInstr(instr);
@@ -423,19 +438,30 @@ pub const CodeGen = struct {
                     "    ; call {s}({d} args)[{f}]\n",
                     .{ op.callee, op.args.len, op.result },
                 );
-                for (op.args, 0..) |arg, idx| {
-                    const target_reg = ra.ARGUMENT_REGISTERS[idx];
-                    const arg_scratch = self.scratch.borrow();
-                    defer self.scratch.release(arg_scratch);
 
-                    const arg_reg = try self.materialize(arg, arg_scratch);
-
-                    if (!std.mem.eql(u8, arg_reg.toString(), target_reg.name.toString())) {
-                        try self.emit("    mov {s}, {s}\n", .{
-                            target_reg.name.toString(), arg_reg.toString(),
-                        });
-                    }
+                if (op.args.len > ra.ARGUMENT_REGISTERS.len) {
+                    @panic("more than 8 call args not yet supported");
                 }
+
+                // BUG: this is WRONG. instead of sequentially, argument passing needs to be done
+                // in a parallel manner to mitigate register swapping issues
+                // (e.g. if arg1 is in x1 but needs to be in x0, and arg0 is in x0 but needs to be in x1,
+                // we can't just move them sequentially or we'll clobber one of the arguments values)
+                // for (op.args, 0..) |arg, idx| {
+                //     const target_reg = ra.ARGUMENT_REGISTERS[idx];
+                //     const arg_scratch = self.scratch.borrow();
+                //     defer self.scratch.release(arg_scratch);
+                //
+                //     const arg_reg = try self.materialize(arg, arg_scratch);
+                //
+                //     if (!std.mem.eql(u8, arg_reg.toString(), target_reg.name.toString())) {
+                //         try self.emit("    mov {s}, {s}\n", .{
+                //             target_reg.name.toString(), arg_reg.toString(),
+                //         });
+                //     }
+                // }
+                try self.emitCallArgs(op.args);
+
                 try self.emit("    bl {s}\n", .{op.callee});
                 try self.store(op.result, .x0);
             },
@@ -447,6 +473,138 @@ pub const CodeGen = struct {
             .gt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "ge"),
 
             // else => @panic("Unsupported instruction type"),
+        }
+    }
+
+    const RegMove = struct { dst: ra.RegisterName, src: ra.RegisterName };
+
+    fn regUsedAsSource(moves: []const RegMove, reg: ra.RegisterName) bool {
+        for (moves) |move| {
+            if (move.src == reg) return true;
+        }
+
+        return false;
+    }
+
+    const DelayedArg = union(enum) {
+        int: struct {
+            dst: ra.RegisterName,
+            value: i64,
+        },
+        bool: struct {
+            dst: ra.RegisterName,
+            value: bool,
+        },
+        stack: struct {
+            dst: ra.RegisterName,
+            offset: isize,
+        },
+    };
+
+    fn emitParallelRegMoves(self: *CodeGen, moves_in: []const RegMove) !void {
+        var moves: std.ArrayList(RegMove) = .empty;
+
+        for (moves_in) |m| {
+            if (!std.mem.eql(u8, m.src.toString(), m.dst.toString())) {
+                try moves.append(self.ctx.allocator, m);
+            }
+        }
+
+        // maybe we need a temp register to properly swap
+        var maybe_tmp: ?ra.RegisterName = null;
+        defer {
+            if (maybe_tmp) |tmp| {
+                self.scratch.release(tmp);
+            }
+        }
+
+        while (moves.items.len > 0) {
+            var progress = false;
+
+            var i: usize = 0;
+            while (i < moves.items.len) : (i += 1) {
+                const move = moves.items[i];
+
+                if (!regUsedAsSource(moves.items, move.dst)) {
+                    try self.emit("    mov {s}, {s}\n", .{
+                        move.dst.toString(), move.src.toString(),
+                    });
+                    _ = moves.orderedRemove(i);
+                    progress = true;
+                    break;
+                }
+            }
+
+            if (progress) continue;
+
+            // we have a cycle, we need to break it with a temp register
+            const tmp = maybe_tmp orelse blk: {
+                const t = self.scratch.borrow();
+                maybe_tmp = t;
+                break :blk t;
+            };
+
+            const src_to_save = moves.items[0].src;
+            std.debug.print("^^^^^^^^^^^^^^^ cycle detected, {d}\n", .{moves.items.len});
+
+            try self.emit("    mov {s}, {s} ; breaking cycle\n", .{
+                tmp.toString(), src_to_save.toString(),
+            });
+
+            for (moves.items) |*move| {
+                if (std.mem.eql(u8, move.src.toString(), src_to_save.toString())) {
+                    move.src = tmp;
+                }
+            }
+        }
+    }
+    fn emitCallArgs(self: *CodeGen, args: []const ir.Operand) !void {
+        var reg_moves: std.ArrayList(RegMove) = .empty;
+        var delayed_args: std.ArrayList(DelayedArg) = .empty;
+
+        for (args, 0..) |arg, idx| {
+            const dst = ra.ARGUMENT_REGISTERS[idx].name;
+
+            switch (arg.value) {
+                .int => |i| {
+                    delayed_args.append(self.ctx.allocator, DelayedArg{
+                        .int = .{ .dst = dst, .value = i },
+                    }) catch @panic("failed to append delayed int arg");
+                },
+                .bool => |b| {
+                    delayed_args.append(self.ctx.allocator, DelayedArg{
+                        .bool = .{ .dst = dst, .value = b },
+                    }) catch @panic("failed to append delayed bool arg");
+                },
+                .variable, .temp => {
+                    switch (self.resolve(arg)) {
+                        .reg => |reg| {
+                            if (!std.mem.eql(u8, reg.name.toString(), dst.toString())) {
+                                reg_moves.append(self.ctx.allocator, RegMove{
+                                    .dst = dst,
+                                    .src = reg.name,
+                                }) catch @panic("failed to append reg move for call arg");
+                            }
+                        },
+                        .stack => |offset| {
+                            delayed_args.append(self.ctx.allocator, DelayedArg{
+                                .stack = .{ .dst = dst, .offset = offset },
+                            }) catch @panic("failed to append delayed stack arg");
+                        },
+                    }
+                },
+                else => std.debug.panic("unsupported argument type for operand {f}", .{arg}),
+            }
+        }
+
+        try self.emitParallelRegMoves(reg_moves.items);
+
+        for (delayed_args.items) |arg| {
+            switch (arg) {
+                .int => |a| try self.emit("    mov {s}, #{d}\n", .{ a.dst.toString(), a.value }),
+                .bool => |a| try self.emit("    mov {s}, #{d}\n", .{ a.dst.toString(), @intFromBool(a.value) }),
+                .stack => |a| try self.emit("    ldr {s}, [x29, #{d}]\n", .{ a.dst.toString(), a.offset }),
+            }
         }
     }
 
@@ -549,7 +707,7 @@ pub const CodeGen = struct {
 
         for (callee_saved, 0..) |reg, i| {
             const offset = -@as(isize, @intCast((i + 1) * 8));
-            try self.emit("    str  {s}, [x29, #{d}]\n", .{ reg.name.toString(), offset });
+            try self.emit("    str {s}, [x29, #{d}]\n", .{ reg.name.toString(), offset });
         }
     }
 
@@ -560,7 +718,7 @@ pub const CodeGen = struct {
         while (i > 0) {
             i -= 1;
             const offset = -@as(isize, @intCast((i + 1) * 8));
-            try self.emit("    ldr  {s}, [x29, #{d}]\n", .{ callee_saved[i].name.toString(), offset });
+            try self.emit("    ldr {s}, [x29, #{d}]\n", .{ callee_saved[i].name.toString(), offset });
         }
 
         try self.emit("    ldp x29, x30, [sp, #{d}]\n", .{frame_size - 16});
