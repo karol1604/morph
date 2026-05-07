@@ -502,6 +502,78 @@ pub const IRGen = struct {
                             },
                         };
                     },
+                    .logical_and => {
+                        result_op = Operand{
+                            .value = .{ .temp = result_temp_id },
+                            .type_id = self.ctx.typeStore().builtins.bool,
+                        };
+
+                        const rhs_block_id = try self.createBlock();
+                        const lhs_false_block_id = try self.createBlock();
+                        const merge_block_id = try self.createBlock();
+
+                        self.setTerminator(.{ .cond_jump = .{
+                            .condition = left_op,
+                            .true_target = rhs_block_id,
+                            .false_target = lhs_false_block_id,
+                        } });
+
+                        try self.switchToBlock(rhs_block_id);
+                        try self.emit(Instr{ .assign = .{
+                            .target = result_op,
+                            .value = right_op,
+                        } });
+                        self.setTerminator(.{ .jump = merge_block_id });
+
+                        try self.switchToBlock(lhs_false_block_id);
+                        try self.emit(Instr{ .assign = .{
+                            .target = result_op,
+                            .value = Operand{
+                                .value = .{ .bool = false },
+                                .type_id = self.ctx.typeStore().builtins.bool,
+                            },
+                        } });
+                        self.setTerminator(.{ .jump = merge_block_id });
+
+                        try self.switchToBlock(merge_block_id);
+                        return result_op;
+                    },
+                    .logical_or => {
+                        result_op = Operand{
+                            .value = .{ .temp = result_temp_id },
+                            .type_id = self.ctx.typeStore().builtins.bool,
+                        };
+
+                        const rhs_block_id = try self.createBlock();
+                        const lhs_true_block_id = try self.createBlock();
+                        const merge_block_id = try self.createBlock();
+
+                        self.setTerminator(.{ .cond_jump = .{
+                            .condition = left_op,
+                            .true_target = lhs_true_block_id,
+                            .false_target = rhs_block_id,
+                        } });
+
+                        try self.switchToBlock(rhs_block_id);
+                        try self.emit(Instr{ .assign = .{
+                            .target = result_op,
+                            .value = right_op,
+                        } });
+                        self.setTerminator(.{ .jump = merge_block_id });
+
+                        try self.switchToBlock(lhs_true_block_id);
+                        try self.emit(Instr{ .assign = .{
+                            .target = result_op,
+                            .value = Operand{
+                                .value = .{ .bool = true },
+                                .type_id = self.ctx.typeStore().builtins.bool,
+                            },
+                        } });
+                        self.setTerminator(.{ .jump = merge_block_id });
+
+                        try self.switchToBlock(merge_block_id);
+                        return result_op;
+                    },
                     else => return error.IRUnimplementedOperator,
                 }
 
