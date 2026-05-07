@@ -2,17 +2,20 @@ const std = @import("std");
 
 const zspan = @import("zspan");
 
-const checker = @import("checker.zig");
-const codegen = @import("codegen.zig");
-const context = @import("context.zig");
-const CompilerContext = context.CompilerContext;
-const ir = @import("ir.zig");
-const lexer = @import("lexer.zig");
-const parser = @import("parser.zig");
-const Span = @import("span.zig").Span;
-const targ = @import("target.zig");
-const parserTests = @import("tests/parser.zig");
-const utils = @import("utils.zig");
+pub const checker = @import("checker.zig");
+pub const codegen = @import("codegen.zig");
+pub const context = @import("context.zig");
+pub const CompilerContext = context.CompilerContext;
+pub const ir = @import("ir.zig");
+pub const lexer = @import("lexer.zig");
+pub const parser = @import("parser.zig");
+pub const Span = @import("span.zig").Span;
+pub const targ = @import("target.zig");
+pub const utils = @import("utils.zig");
+pub const type_store = @import("type_store.zig");
+pub const checked_ast = @import("checked_ast.zig");
+pub const tok = @import("token.zig");
+pub const ast = @import("ast.zig");
 
 fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
     for (ctx.diagnostics.items) |diag| {
@@ -141,10 +144,6 @@ pub fn main(init: std.process.Init) !void {
     // for (instructions) |instr| {
     //     std.debug.print("{f}", .{instr});
     // }
-}
-
-test "Tests" {
-    std.testing.refAllDecls(parserTests);
 }
 
 fn assembleAndLink(

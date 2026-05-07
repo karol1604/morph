@@ -68,6 +68,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // const compiler_mod = b.createModule(.{
+    //     .root_source_file = b.path("src/main.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+
     exe.root_module.addImport("zspan", zspanDep.module("zspan"));
 
     // This declares intent for the executable to be installed into the
@@ -117,9 +123,40 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const lexer_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/unit/lexer_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const parser_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/unit/parser_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const checker_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/unit/checker_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    checker_tests.root_module.addImport("morph", exe.root_module);
+    lexer_tests.root_module.addImport("morph", exe.root_module);
+    parser_tests.root_module.addImport("morph", exe.root_module);
+
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const run_e2e_tests = b.addRunArtifact(e2e_tests);
+    const run_lexer_tests = b.addRunArtifact(lexer_tests);
+    const run_checker_tests = b.addRunArtifact(checker_tests);
+    const run_parser_tests = b.addRunArtifact(parser_tests);
 
     // const install_exe = b.addInstallArtifact(exe, .{});
     run_e2e_tests.step.dependOn(&exe.step);
@@ -135,6 +172,9 @@ pub fn build(b: *std.Build) void {
 
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_e2e_tests.step);
+    test_step.dependOn(&run_lexer_tests.step);
+    test_step.dependOn(&run_checker_tests.step);
+    test_step.dependOn(&run_parser_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

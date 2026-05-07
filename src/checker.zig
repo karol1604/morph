@@ -77,17 +77,6 @@ pub const Checker = struct {
 
         const type_arena = TypeStore.init(ctx.allocator);
 
-        std.debug.print("Builtins: Unit={d} Int={d} Bool={d} Error={d}\n", .{
-            type_arena.builtins.unit,
-            type_arena.builtins.int,
-            type_arena.builtins.bool,
-            type_arena.builtins.err,
-        });
-        // _ = try typeArena.addType(.{ .Named = "Unit" });
-        // _ = try typeArena.addType(.{ .Named = "Int" });
-        // _ = try typeArena.addType(.{ .Named = "Bool" });
-        // _ = try typeArena.addType(.{ .Named = "ErrorType" });
-
         return Checker{
             .ctx = ctx,
             .exprs = exprs,

@@ -232,8 +232,6 @@ pub const Parser = struct {
         self.advance(); // consume `if`
         self.skipNewlines(); // allow newlines after `if`
 
-        std.debug.print("Parsing if expression...\n", .{});
-
         const condition = try self.parseExpression(.lowest);
         self.skipNewlines(); // allow newlines before `then`
         _ = try self.expect(.kw_then);

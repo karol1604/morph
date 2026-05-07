@@ -74,5 +74,6 @@ test "e2e test suite" {
             case.source,
             case.expected_exit,
         });
+        try std.testing.expect(false);
     }
 }
