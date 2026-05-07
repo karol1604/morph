@@ -168,13 +168,16 @@ pub fn build(b: *std.Build) void {
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
-    const test_step = b.step("test", "Run tests");
+    const full_test_step = b.step("test", "Run tests");
 
-    test_step.dependOn(&run_exe_tests.step);
-    test_step.dependOn(&run_e2e_tests.step);
-    test_step.dependOn(&run_lexer_tests.step);
-    test_step.dependOn(&run_checker_tests.step);
-    test_step.dependOn(&run_parser_tests.step);
+    full_test_step.dependOn(&run_exe_tests.step);
+    full_test_step.dependOn(&run_e2e_tests.step);
+    full_test_step.dependOn(&run_lexer_tests.step);
+    full_test_step.dependOn(&run_checker_tests.step);
+    full_test_step.dependOn(&run_parser_tests.step);
+
+    const e2e_test_step = b.step("e2e_test", "Run e2e tests");
+    e2e_test_step.dependOn(&run_e2e_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

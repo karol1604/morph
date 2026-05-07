@@ -412,14 +412,14 @@ pub const IRGen = struct {
             },
             .binary => |bin| {
                 const left_op = try self.genExpr(bin.left);
-                const right_op = try self.genExpr(bin.right);
-
-                const result_temp_id = self.nextId();
                 var result_op: Operand = undefined;
                 var instr: Instr = undefined;
 
                 switch (bin.operator) {
                     .plus, .minus, .multiply, .divide => {
+                        const right_op = try self.genExpr(bin.right);
+                        const result_temp_id = self.nextId();
+
                         result_op = Operand{
                             .value = .{ .temp = result_temp_id },
                             .type_id = self.ctx.typeStore().builtins.int,
@@ -454,6 +454,9 @@ pub const IRGen = struct {
                     .less_than_or_eq,
                     .greater_than_or_eq,
                     => {
+                        const right_op = try self.genExpr(bin.right);
+                        const result_temp_id = self.nextId();
+
                         result_op = Operand{
                             .value = .{ .temp = result_temp_id },
                             .type_id = self.ctx.typeStore().builtins.bool,
@@ -503,6 +506,8 @@ pub const IRGen = struct {
                         };
                     },
                     .logical_and => {
+                        const result_temp_id = self.nextId();
+
                         result_op = Operand{
                             .value = .{ .temp = result_temp_id },
                             .type_id = self.ctx.typeStore().builtins.bool,
@@ -519,6 +524,8 @@ pub const IRGen = struct {
                         } });
 
                         try self.switchToBlock(rhs_block_id);
+                        const right_op = try self.genExpr(bin.right);
+
                         try self.emit(Instr{ .assign = .{
                             .target = result_op,
                             .value = right_op,
@@ -539,6 +546,8 @@ pub const IRGen = struct {
                         return result_op;
                     },
                     .logical_or => {
+                        const result_temp_id = self.nextId();
+
                         result_op = Operand{
                             .value = .{ .temp = result_temp_id },
                             .type_id = self.ctx.typeStore().builtins.bool,
@@ -555,6 +564,7 @@ pub const IRGen = struct {
                         } });
 
                         try self.switchToBlock(rhs_block_id);
+                        const right_op = try self.genExpr(bin.right);
                         try self.emit(Instr{ .assign = .{
                             .target = result_op,
                             .value = right_op,

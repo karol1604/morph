@@ -1,10 +1,4 @@
-add : Int × Int -> Int
-add x y => x + y
+count : Int -> Int
+count n => if n <= 0 then 0 else 1 + count(n - 1)
 
-fib : Int -> Int
-fib n => {
-  if n <= 1 then n
-  else add(fib (n - 1) , fib (n - 2))
-}
-
-fib(10)
+count(255 * 10000)

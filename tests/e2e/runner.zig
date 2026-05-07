@@ -29,6 +29,7 @@ const cases = [_]Case{
     .{ .source = "tests/e2e/cases/021-compose_calls.mp", .expected_exit = 42 },
     .{ .source = "tests/e2e/cases/022-nested_blocks.mp", .expected_exit = 25 },
     .{ .source = "tests/e2e/cases/023-boundary_comparison.mp", .expected_exit = 2 },
+    .{ .source = "tests/e2e/cases/024-stress.mp", .expected_exit = 42 },
 };
 
 test "e2e test suite" {

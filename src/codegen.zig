@@ -711,8 +711,11 @@ pub const CodeGen = struct {
                 defer self.scratch.release(s);
                 const r = try self.materialize(cj.condition, s);
 
-                try self.emit("    cmp {s}, #1\n", .{r.toString()});
-                try self.emit("    b.eq block_{s}_{d}\n", .{ func_name, cj.true_target });
+                try self.emit("    cbnz {s}, block_{s}_{d}\n", .{
+                    r.toString(), func_name, cj.true_target,
+                });
+                // try self.emit("    cmp {s}, #1\n", .{r.toString()});
+                // try self.emit("    b.eq block_{s}_{d}\n", .{ func_name, cj.true_target });
                 try self.emit("    b block_{s}_{d}\n", .{ func_name, cj.false_target });
             },
             // else => @panic("Unsupported terminator type"),
