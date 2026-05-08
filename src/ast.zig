@@ -76,13 +76,13 @@ pub const ExprKind = union(enum) {
     },
 };
 
-pub const UnaryOperator = union(enum) {
+pub const UnaryOperator = enum {
     plus,
     minus,
     not,
 };
 
-pub const BinaryOperator = union(enum) {
+pub const BinaryOperator = enum {
     plus,
     minus,
     divide,

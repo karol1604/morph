@@ -2,6 +2,7 @@ const std = @import("std");
 const context = @import("context.zig");
 const checked_ast = @import("checked_ast.zig");
 const type_store = @import("type_store.zig");
+const tca = @import("tail_call_analyzer.zig");
 
 const TempId = usize;
 
@@ -168,6 +169,10 @@ pub const Instr = union(enum) {
         callee: []const u8,
         args: []Operand,
     },
+    tail_call: struct {
+        callee: []const u8,
+        args: []Operand,
+    },
 
     pub fn format(self: Instr, writer: *std.Io.Writer) !void {
         return switch (self) {
@@ -244,15 +249,17 @@ pub const IRGen = struct {
     ctx: *context.CompilerContext,
     variables: std.ArrayList(Variable) = .empty,
     temp_id: usize = 0,
+    tail_calls: *const tca.TailCallSet,
 
     functions: std.ArrayList(IRFunction) = .empty,
     current_func_idx: ?usize = null,
     current_block_idx: ?usize = null,
     next_block_idx: usize = 0,
 
-    pub fn init(ctx: *context.CompilerContext) IRGen {
+    pub fn init(ctx: *context.CompilerContext, tail_calls: *const tca.TailCallSet) IRGen {
         return IRGen{
             .ctx = ctx,
+            .tail_calls = tail_calls,
         };
     }
 
@@ -698,6 +705,20 @@ pub const IRGen = struct {
                     .{ call.callee, call.id },
                 );
 
+                if (self.tail_calls.contains(call.id)) {
+                    try self.emit(Instr{ .tail_call = .{
+                        .callee = full_name,
+                        .args = try arg_ops.toOwnedSlice(self.ctx.allocator),
+                    } });
+
+                    return result_op;
+                    // dummy return
+                    // return Operand{
+                    //     .value = .unit,
+                    //     .type_id = self.ctx.typeStore().builtins.unit,
+                    // };
+                }
+
                 try self.emit(Instr{ .call = .{
                     .result = result_op,
                     .callee = full_name,
@@ -880,6 +901,14 @@ pub const IRGen = struct {
             .call => |x| {
                 dumpOperand(x.result, ts);
                 std.debug.print(" := call {s}(", .{x.callee});
+                for (x.args, 0..) |arg, i| {
+                    dumpOperand(arg, ts);
+                    if (i < x.args.len - 1) std.debug.print(", ", .{});
+                }
+                std.debug.print(")", .{});
+            },
+            .tail_call => |x| {
+                std.debug.print("tail call {s}(", .{x.callee});
                 for (x.args, 0..) |arg, i| {
                     dumpOperand(arg, ts);
                     if (i < x.args.len - 1) std.debug.print(", ", .{});

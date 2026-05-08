@@ -151,7 +151,7 @@ pub const CodeGen = struct {
         for (func.blocks.items) |block| {
             for (block.instructions.items) |instr| {
                 switch (instr) {
-                    .call => call_sites.append(self.ctx.allocator, pos) catch
+                    .call, .tail_call => call_sites.append(self.ctx.allocator, pos) catch
                         @panic("failed to append call site"),
                     else => {},
                 }
@@ -310,7 +310,7 @@ pub const CodeGen = struct {
                             });
                         }
                     },
-                    else => @panic("assign: unsupported value kind"),
+                    else => std.debug.panic("unsupported operand type for assign: {f}", .{op.value}),
                 }
                 if (d.must_store) {
                     try self.store(op.target, d.reg);
@@ -480,6 +480,20 @@ pub const CodeGen = struct {
 
                 try self.emit("    bl {s}\n", .{op.callee});
                 try self.store(op.result, .x0);
+            },
+            .tail_call => |op| {
+                try self.emit(
+                    "    ; tail call {s}({d} args)\n",
+                    .{ op.callee, op.args.len },
+                );
+
+                if (op.args.len > ra.ARGUMENT_REGISTERS.len) {
+                    @panic("more than 8 call args not yet supported");
+                }
+
+                try self.emitCallArgs(op.args);
+                try self.emitEpilogue(self.current_frame_size, self.current_callee_saved);
+                try self.emit("    b {s}\n", .{op.callee});
             },
             .eq => |op| try self.emitCondition(op.result, op.left, op.right, "eq"),
             .neq => |op| try self.emitCondition(op.result, op.left, op.right, "ne"),

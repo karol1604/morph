@@ -16,6 +16,7 @@ pub const type_store = @import("type_store.zig");
 pub const checked_ast = @import("checked_ast.zig");
 pub const tok = @import("token.zig");
 pub const ast = @import("ast.zig");
+const tail_call_analyzer = @import("tail_call_analyzer.zig");
 
 fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
     for (ctx.diagnostics.items) |diag| {
@@ -120,7 +121,16 @@ pub fn main(init: std.process.Init) !void {
         utils.prettyPrintCheckedExpression(&expr.*);
     }
 
-    var ir_gen = ir.IRGen.init(&ctx);
+    var tca = tail_call_analyzer.init(ctx.allocator);
+    try tca.analyze(checked_exprs);
+
+    var tc_it = tca.tail_calls.keyIterator();
+    std.debug.print("Tail call positions:\n", .{});
+    while (tc_it.next()) |key| {
+        std.debug.print("  - {d}\n", .{key.*});
+    }
+
+    var ir_gen = ir.IRGen.init(&ctx, &tca.tail_calls);
     try ir_gen.generate(checked_exprs);
 
     std.debug.print("************\n", .{});

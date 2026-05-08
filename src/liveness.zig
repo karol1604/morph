@@ -204,7 +204,7 @@ fn instrInputsAndOutput(instr: ir.Instr) InstrOperands {
         .assign => |op| .{ .inputs = .{ op.value, null }, .output = op.target },
         .unary_minus => |op| .{ .inputs = .{ op.operand, null }, .output = op.result },
         .unary_not => |op| .{ .inputs = .{ op.operand, null }, .output = op.result },
-        .call => unreachable, // handled separately
+        .call, .tail_call => unreachable, // handled separately
     };
 }
 
@@ -238,6 +238,14 @@ fn computeUseDefSets(func: *const IRFunction, blocks: []BlockInfo) !void {
                     if (operandToKey(call.result)) |key| {
                         if (!blocks[i].use.contains(key)) try blocks[i].def.put(key, {});
                     }
+                },
+                .tail_call => |call| {
+                    for (call.args) |arg| {
+                        if (operandToKey(arg)) |key| {
+                            if (!blocks[i].def.contains(key)) try blocks[i].use.put(key, {});
+                        }
+                    }
+                    // no need to def anything here since tail call result is not used
                 },
                 else => {
                     const ops = instrInputsAndOutput(instr);
@@ -343,6 +351,19 @@ fn buildIntervals(
                             entry.value_ptr.* = .{ .key = key, .start = idx, .end = idx };
                         }
                     }
+                },
+                .tail_call => |call| {
+                    for (call.args) |arg| {
+                        if (operandToKey(arg)) |key| {
+                            const entry = try interval_map.getOrPut(key);
+                            if (!entry.found_existing) {
+                                entry.value_ptr.* = .{ .key = key, .start = idx, .end = idx };
+                            } else {
+                                entry.value_ptr.end = @max(entry.value_ptr.end, idx);
+                            }
+                        }
+                    }
+                    // no result operand so nothing to def
                 },
                 else => {
                     const ops = instrInputsAndOutput(instr);
