@@ -449,9 +449,10 @@ pub const CodeGen = struct {
                 }
             },
             .call => |op| {
+                const callee = if (std.mem.eql(u8, op.callee, "printInt$0")) "_print_int" else op.callee;
                 try self.emit(
                     "    ; call {s}({d} args)[{f}]\n",
-                    .{ op.callee, op.args.len, op.result },
+                    .{ callee, op.args.len, op.result },
                 );
 
                 if (op.args.len > ra.ARGUMENT_REGISTERS.len) {
@@ -478,10 +479,13 @@ pub const CodeGen = struct {
 
                 try self.emitCallArgs(op.args);
 
-                try self.emit("    bl {s}\n", .{op.callee});
+                try self.emit("    bl {s}\n", .{callee});
                 try self.store(op.result, .x0);
             },
             .tail_call => |op| {
+                const is_extern = std.mem.eql(u8, op.callee, "printInt$0");
+                const callee = if (is_extern) "_print_int" else op.callee;
+
                 try self.emit(
                     "    ; tail call {s}({d} args)\n",
                     .{ op.callee, op.args.len },
@@ -493,7 +497,10 @@ pub const CodeGen = struct {
 
                 try self.emitCallArgs(op.args);
                 try self.emitEpilogue(self.current_frame_size, self.current_callee_saved);
-                try self.emit("    b {s}\n", .{op.callee});
+                if (!is_extern)
+                    try self.emit("    b {s}\n", .{callee})
+                else
+                    try self.emit("    bl {s}\n", .{callee});
             },
             .eq => |op| try self.emitCondition(op.result, op.left, op.right, "eq"),
             .neq => |op| try self.emitCondition(op.result, op.left, op.right, "ne"),

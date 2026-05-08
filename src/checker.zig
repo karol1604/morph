@@ -66,7 +66,7 @@ pub const Checker = struct {
     scopes: std.ArrayList(*Scope),
     global_scope: *Scope,
     type_store: TypeStore,
-    next_var_id: usize = 0,
+    next_var_id: usize = 1, // FIXME: this is for the extern `printInt`, we should find a better way to handle built-in functions
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
         const global_scope = try ctx.allocator.create(Scope);
@@ -75,7 +75,25 @@ pub const Checker = struct {
         var scopes: std.ArrayList(*Scope) = .empty;
         try scopes.append(ctx.allocator, global_scope);
 
-        const type_arena = TypeStore.init(ctx.allocator);
+        var type_arena = TypeStore.init(ctx.allocator);
+
+        const print_int_type_id = try type_arena.addType(.{ .function = .{
+            .domain = type_arena.builtins.int,
+            .codomain = type_arena.builtins.unit,
+        } });
+
+        try global_scope.defineSymbol(type_store.Symbol{
+            .name = "printInt",
+            .type_id = print_int_type_id,
+            .kind = .Function,
+            .id = 0, // id doesn't matter for built-in functions
+            .span = Span{
+                .start = span_.Location{ .col = 0, .line = 0, .offset = 0 },
+                .end = span_.Location{ .col = 0, .line = 0, .offset = 0 },
+            }, // FIXME: add spans for built-ins
+            .domain_span = null,
+            .codomain_span = null,
+        });
 
         return Checker{
             .ctx = ctx,

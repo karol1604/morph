@@ -187,6 +187,7 @@ fn assembleAndLink(
             "_main",
             "-arch",
             "arm64",
+            "/Users/karol/projects/morph/src/tests/runtime.o",
         },
     });
     if (ld_res.term.exited != 0) {
