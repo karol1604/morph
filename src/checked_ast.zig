@@ -67,7 +67,8 @@ pub const CheckedExprKind = union(enum) {
     func_call: struct {
         callee: []const u8,
         args: []const *const CheckedExpr,
-        id: usize, // unique id for this function call
+        function_id: usize, // unique id for the function being called
+        call_id: usize, // unique id for this call site (for tail call analysis)
     },
 
     @"if": struct {

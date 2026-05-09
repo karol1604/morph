@@ -702,10 +702,10 @@ pub const IRGen = struct {
                 const full_name = try std.fmt.allocPrint(
                     self.ctx.allocator,
                     "{s}${d}",
-                    .{ call.callee, call.id },
+                    .{ call.callee, call.function_id },
                 );
 
-                if (self.tail_calls.contains(call.id)) {
+                if (self.tail_calls.contains(call.call_id)) {
                     try self.emit(Instr{ .tail_call = .{
                         .callee = full_name,
                         .args = try arg_ops.toOwnedSlice(self.ctx.allocator),

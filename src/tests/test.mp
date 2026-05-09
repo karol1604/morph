@@ -20,4 +20,6 @@ fact n => {
 }
 
 let a ∈ Int = 10
-count(a)
+count_helper(a, 0)
+
+

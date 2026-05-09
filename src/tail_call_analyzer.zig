@@ -43,11 +43,19 @@ fn visit(
         },
         .func_call => |call_expr| {
             if (in_tail_pos) {
-                try self.tail_calls.put(call_expr.id, {});
+                try self.tail_calls.put(call_expr.call_id, {});
             }
 
             for (call_expr.args) |arg| {
                 try self.visit(arg, false);
+            }
+        },
+        .block => |block_expr| {
+            for (block_expr.stmts) |stmt| {
+                try self.visit(stmt, false);
+            }
+            if (block_expr.tail) |tail_expr| {
+                try self.visit(tail_expr, in_tail_pos);
             }
         },
         else => {},

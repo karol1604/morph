@@ -67,6 +67,7 @@ pub const Checker = struct {
     global_scope: *Scope,
     type_store: TypeStore,
     next_var_id: usize = 0,
+    next_call_id: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
         const global_scope = try ctx.allocator.create(Scope);
@@ -269,7 +270,8 @@ pub const Checker = struct {
                     .func_call = .{
                         .callee = func_call.callee,
                         .args = &[_]*const CheckedExpr{},
-                        .id = 0, // NOTE: id doesn't matter since it's error-typed
+                        .function_id = 0, // NOTE: id doesn't matter since it's error-typed
+                        .call_id = 0,
                     },
                 },
                 self.type_store.builtins.err,
@@ -291,7 +293,8 @@ pub const Checker = struct {
                     .func_call = .{
                         .callee = func_call.callee,
                         .args = &[_]*const CheckedExpr{},
-                        .id = 0, // NOTE: id doesn't matter since it's error-typed
+                        .function_id = 0, // NOTE: id doesn't matter since it's error-typed
+                        .call_id = 0,
                     },
                 },
                 self.type_store.builtins.err,
@@ -338,7 +341,8 @@ pub const Checker = struct {
                 .func_call = .{
                     .callee = func_call.callee,
                     .args = checked_args,
-                    .id = func_sym.?.id,
+                    .function_id = func_sym.?.id,
+                    .call_id = self.getNewCallId(),
                 },
             },
             codomain_id,
@@ -1024,6 +1028,13 @@ pub const Checker = struct {
         self.next_var_id += 1;
         return id;
     }
+
+    fn getNewCallId(self: *Checker) usize {
+        const id = self.next_call_id;
+        self.next_call_id += 1;
+        return id;
+    }
+
     fn currentScope(self: *const Checker) *Scope {
         return self.scopes.items[self.scopes.items.len - 1];
     }
