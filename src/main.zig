@@ -18,6 +18,39 @@ pub const tok = @import("token.zig");
 pub const ast = @import("ast.zig");
 const tail_call_analyzer = @import("tail_call_analyzer.zig");
 
+const Args = struct {
+    path: []const u8,
+    verbose: bool = false,
+};
+
+fn parseArgs(args: *std.process.Args.Iterator) void {
+    _ = args.next(); // skip program name
+
+    var res = Args{ .path = undefined };
+    var got_path = false;
+
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--verbose") or std.mem.eql(u8, arg, "-v")) {
+            res.verbose = true;
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            std.debug.print("Unknown flag: {s}\n", .{arg});
+            return error.InvalidArgument;
+        } else {
+            res.path = arg;
+            got_path = true;
+        }
+    }
+
+    if (!got_path) {
+        std.debug.print("Usage: morph [options] <file>\n", .{});
+        std.debug.print("  -o <path>     output binary path\n", .{});
+        std.debug.print("  -v, --verbose show tokens, IR, type store\n", .{});
+        return error.InvalidArgs;
+    }
+
+    return res;
+}
+
 fn printDiagnostics(ctx: *CompilerContext, writer: *std.Io.Writer) !void {
     for (ctx.diagnostics.items) |diag| {
         try zspan.displayDiagnostic(

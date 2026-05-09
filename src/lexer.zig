@@ -127,6 +127,12 @@ pub const Lexer = struct {
                         .kind = .right_arrow,
                         .span = Span{ .start = prev_loc, .end = self.currentLocation() },
                     };
+                } else if (try self.match('-')) {
+                    // Comment, skip until end of line
+                    while (self.peek() != '\n' and !self.isAtEnd()) {
+                        _ = try self.advance();
+                    }
+                    return null;
                 } else {
                     return Token{
                         .kind = .minus,

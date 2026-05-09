@@ -1,6 +1,5 @@
 count_helper : Int × Int -> Int
 count_helper n acc => {
-    printInt(acc)
     if n <= 0 then acc
     else count_helper(n - 1, acc + 1)
 }
@@ -20,3 +19,5 @@ fact n => {
     else n * fact(n - 1)
 }
 
+let a ∈ Int = 10
+count(a)

@@ -66,7 +66,7 @@ pub const Checker = struct {
     scopes: std.ArrayList(*Scope),
     global_scope: *Scope,
     type_store: TypeStore,
-    next_var_id: usize = 1, // FIXME: this is for the extern `printInt`, we should find a better way to handle built-in functions
+    next_var_id: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
         const global_scope = try ctx.allocator.create(Scope);
@@ -75,18 +75,26 @@ pub const Checker = struct {
         var scopes: std.ArrayList(*Scope) = .empty;
         try scopes.append(ctx.allocator, global_scope);
 
-        var type_arena = TypeStore.init(ctx.allocator);
+        const type_arena = TypeStore.init(ctx.allocator);
 
-        const print_int_type_id = try type_arena.addType(.{ .function = .{
+        var checker = Checker{
+            .ctx = ctx,
+            .exprs = exprs,
+            .scopes = scopes,
+            .global_scope = global_scope,
+            .type_store = type_arena,
+        };
+
+        const print_int_type_id = try checker.type_store.addType(.{ .function = .{
             .domain = type_arena.builtins.int,
             .codomain = type_arena.builtins.unit,
         } });
 
-        try global_scope.defineSymbol(type_store.Symbol{
+        try checker.global_scope.defineSymbol(type_store.Symbol{
             .name = "printInt",
             .type_id = print_int_type_id,
             .kind = .Function,
-            .id = 0, // id doesn't matter for built-in functions
+            .id = checker.getNewVarId(),
             .span = Span{
                 .start = span_.Location{ .col = 0, .line = 0, .offset = 0 },
                 .end = span_.Location{ .col = 0, .line = 0, .offset = 0 },
@@ -95,13 +103,14 @@ pub const Checker = struct {
             .codomain_span = null,
         });
 
-        return Checker{
-            .ctx = ctx,
-            .exprs = exprs,
-            .scopes = scopes,
-            .global_scope = global_scope,
-            .type_store = type_arena,
-        };
+        return checker;
+        // return Checker{
+        //     .ctx = ctx,
+        //     .exprs = exprs,
+        //     .scopes = scopes,
+        //     .global_scope = global_scope,
+        //     .type_store = type_arena,
+        // };
     }
 
     pub fn check(self: *Checker) ![]*CheckedExpr {
@@ -388,7 +397,7 @@ pub const Checker = struct {
                         .name = func_def.name,
                         .body = undefined,
                         .params = undefined,
-                        .id = 0, // NOTE: id doesn't matter since it's error-typed
+                        .id = 0, // id doesn't matter since it's error-typed
                     },
                 },
                 self.type_store.builtins.err,
