@@ -259,19 +259,6 @@ pub const CodeGen = struct {
         try self.emit("\n", .{});
     }
 
-    fn resolveRegister(self: *CodeGen, op: ir.Operand) []const u8 {
-        const key: liveness.LivenessKey = switch (op.value) {
-            .temp => |id| .{ .temp = id },
-            .local => |name| .{ .local = name },
-            else => std.debug.panic("unsupported operand type for register resolution {f}", .{op}),
-        };
-        const alloc = self.allocations.?.get(key) orelse @panic("no allocation for operand");
-        return switch (alloc) {
-            .reg => |reg| reg.name.toString(),
-            .stack => @panic("handle spills separately"),
-        };
-    }
-
     fn materialize(self: *CodeGen, operand: ir.Operand, dest_reg: ra.RegisterName) !ra.RegisterName {
         switch (operand.value) {
             .int => |i| {
@@ -483,24 +470,6 @@ pub const CodeGen = struct {
                     @panic("more than 8 call args not yet supported");
                 }
 
-                // BUG: this is WRONG. instead of sequentially, argument passing needs to be done
-                // in a parallel manner to mitigate register swapping issues
-                // (e.g. if arg1 is in x1 but needs to be in x0, and arg0 is in x0 but needs to be in x1,
-                // we can't just move them sequentially or we'll clobber one of the arguments values)
-                // for (op.args, 0..) |arg, idx| {
-                //     const target_reg = ra.ARGUMENT_REGISTERS[idx];
-                //     const arg_scratch = self.scratch.borrow();
-                //     defer self.scratch.release(arg_scratch);
-                //
-                //     const arg_reg = try self.materialize(arg, arg_scratch);
-                //
-                //     if (!std.mem.eql(u8, arg_reg.toString(), target_reg.name.toString())) {
-                //         try self.emit("    mov {s}, {s}\n", .{
-                //             target_reg.name.toString(), arg_reg.toString(),
-                //         });
-                //     }
-                // }
-
                 try self.emitCallArgs(op.args);
 
                 try self.emit("    bl {s}\n", .{callee});
@@ -536,11 +505,6 @@ pub const CodeGen = struct {
             .lt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "le"),
             .gt => |op| try self.emitCondition(op.result, op.left, op.right, "gt"),
             .gt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "ge"),
-            // .unary_not => |op| try self.emitCondition(op.result, op.operand, ir.Operand{
-            //     .value = .{ .int = 0 },
-            //     .type_id = self.ctx.typeStore().builtins.int,
-            // }, "eq"),
-
             // else => @panic("Unsupported instruction type"),
         }
     }

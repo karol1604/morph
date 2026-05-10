@@ -31,6 +31,7 @@ const cases = [_]Case{
     .{ .source = "tests/e2e/cases/023-boundary_comparison.mp", .expected_exit = 2 },
     .{ .source = "tests/e2e/cases/024-stress.mp", .expected_exit = 42 },
     .{ .source = "tests/e2e/cases/025-tco-applies.mp", .expected_exit = 1 },
+    .{ .source = "tests/e2e/cases/026-spills_many_live_locals.mp", .expected_exit = 16 },
 };
 
 test "e2e test suite" {

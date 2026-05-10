@@ -107,13 +107,6 @@ pub const Checker = struct {
         try checker.ctx.debug_names.addFunctionName(id, "printInt");
 
         return checker;
-        // return Checker{
-        //     .ctx = ctx,
-        //     .exprs = exprs,
-        //     .scopes = scopes,
-        //     .global_scope = global_scope,
-        //     .type_store = type_arena,
-        // };
     }
 
     pub fn check(self: *Checker) ![]*CheckedExpr {
@@ -180,11 +173,6 @@ pub const Checker = struct {
         const then_checked = try self.checkExpr(if_expr.then_branch, type_exp);
 
         if (if_expr.else_branch == null and then_checked.type_id != self.type_store.builtins.unit) {
-            // self.ctx.reportError(
-            //     expr.span,
-            //     "if expression without else branch must have a Unit-typed body, got `{s}`",
-            //     .{self.typeStore.formatTypeName(thenChecked.typeId)},
-            // );
             var d = DiagnosticBuilder.err(
                 self.ctx,
                 "if expression without an else branch must return Unit",
@@ -221,17 +209,6 @@ pub const Checker = struct {
                 .reason = "if branches must have the same type",
             };
             else_checked = try self.checkExpr(elseBranch, else_exp);
-
-            // if (thenChecked.typeId != elseChecked.?.typeId) { // NOTE: we know there is en else branch
-            //     self.ctx.reportError(
-            //         expr.span,
-            //         "type mismatch between then and else branches: `{s}` vs `{s}`",
-            //         .{
-            //             self.typeStore.formatTypeName(thenChecked.typeId),
-            //             self.typeStore.formatTypeName(elseChecked.?.typeId),
-            //         },
-            //     );
-            // }
         }
 
         const result_type = if (else_checked) |_| then_checked.type_id else self.type_store.builtins.unit;
@@ -255,11 +232,6 @@ pub const Checker = struct {
         const func_call = expr.kind.func_call;
         const func_sym = self.currentScope().lookupSymbol(func_call.callee);
         if (func_sym == null) {
-            // self.ctx.reportError(
-            //     expr.span,
-            //     "call to undeclared function `{s}`",
-            //     .{funcCall.callee},
-            // );
             var d = DiagnosticBuilder.err(self.ctx, "call to undeclared function `{s}`", .{func_call.callee});
             _ = d.primaryLabel(expr.span, "function call found here", .{})
                 .note(
@@ -310,11 +282,6 @@ pub const Checker = struct {
 
         const param_types = try self.collectParamTypes(domain_id);
         if (param_types.len != func_call.args.len) {
-            // self.ctx.reportError(
-            //     expr.span,
-            //     "function `{s}` expecte {d} arguments, got {d}",
-            //     .{ funcCall.callee, paramTypes.len, funcCall.args.len },
-            // );
             var d = DiagnosticBuilder.err(
                 self.ctx,
                 "function `{s}` expected {d} arguments, got {d}",
@@ -619,14 +586,6 @@ pub const Checker = struct {
                     } },
                 );
             },
-            // else => {
-            //     self.ctx.reportError(
-            //         type_expr.span,
-            //         "invalid type expression",
-            //         .{},
-            //     );
-            //     return self.typeStore.builtins.Error;
-            // },
         }
     }
 
@@ -665,7 +624,6 @@ pub const Checker = struct {
         const ident_name = expr.kind.identifier;
         const symbol = self.currentScope().lookupSymbol(ident_name);
         if (symbol == null) {
-            // self.ctx.reportError(expr.span, "undeclared variable `{s}`", .{identName});
             var d = DiagnosticBuilder.err(self.ctx, "undeclared variable `{s}`", .{ident_name});
             _ = d.primaryLabel(expr.span, "use found here", .{});
             d.emit();
@@ -693,14 +651,8 @@ pub const Checker = struct {
 
     fn checkVariableDecl(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
         const var_decl = expr.kind.variable_decl;
-        // var expectedTypeId: ?TypeId = null;
 
         if (self.type_store.resolve(var_decl.name)) |_| {
-            // self.ctx.reportError(
-            //     expr.span,
-            //     "variable `{s}` shadows type name",
-            //     .{varDecl.name},
-            // );
             var d = DiagnosticBuilder.err(
                 self.ctx,
                 "variable `{s}` shadows a type name",
@@ -717,16 +669,6 @@ pub const Checker = struct {
 
         var value_exp: ?TypeExpectation = null;
         if (var_decl.type) |typeExpr| {
-            // if (self.typeStore.get(.{ .Named = typeExpr })) |tid| {
-            //     expectedTypeId = tid;
-            // } else {
-            //     self.ctx.reportError(
-            //         expr.span,
-            //         "unknown type `{s}`",
-            //         .{typeExpr},
-            //     );
-            //     expectedTypeId = self.typeStore.builtins.Error;
-            // }
             const expected_type_id = try self.resolveTypeExpr(typeExpr);
             value_exp = TypeExpectation{
                 .type_id = expected_type_id,
@@ -741,12 +683,6 @@ pub const Checker = struct {
 
         var result_type: TypeId = self.type_store.builtins.unit;
         if (self.type_store.resolve(var_decl.name)) |_| {
-            // NOTE: ????
-            // self.ctx.reportError(
-            //     expr.span,
-            //     "variable `{s}` shadows type name",
-            //     .{varDecl.name},
-            // );
             result_type = self.type_store.builtins.err;
         } else {
             self.declareVariable(var_decl.name, value_checked.type_id, id, expr.span) catch |err| switch (err) {
