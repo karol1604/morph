@@ -355,7 +355,7 @@ fn prettyPrintRecCheck(
             prettyPrintRecCheck(def.body, depth + 1, treeLines, true);
         },
         .func_call => |call| {
-            std.debug.print("FunctionCall: {s} (typeId: {d})\n", .{ call.callee, expr.type_id });
+            std.debug.print("FunctionCall: {s} (typeId: {d})\n", .{ call.callee_name, expr.type_id });
 
             treeLines[depth] = !isLast;
 

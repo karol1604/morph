@@ -1,16 +1,17 @@
 const std = @import("std");
 const ir = @import("ir.zig");
 const IRFunction = ir.IRFunction;
+const ids = @import("ids.zig");
 
 // NOTE: is this good?
 pub const LivenessKey = union(enum) {
-    temp: usize,
-    variable: []const u8,
+    temp: ids.TempId,
+    local: ids.LocalId,
 
     pub fn format(self: LivenessKey, writer: *std.Io.Writer) !void {
         switch (self) {
             .temp => |id| try writer.print("Temp(t{d})", .{id}),
-            .variable => |name| try writer.print("Var({s})", .{name}),
+            .local => |id| try writer.print("Local({d})", .{id}),
         }
     }
 };
@@ -24,7 +25,7 @@ pub const LiveInterval = struct {
         try writer.print("LiveInterval {{ ", .{});
         switch (self.key) {
             .temp => |id| try writer.print("Temp(t{d}) ", .{id}),
-            .variable => |name| try writer.print("Var({s}) ", .{name}),
+            .local => |id| try writer.print("Local({d}) ", .{id}),
         }
         try writer.print("start: {d}, end: {d} }}", .{ self.start, self.end });
     }
@@ -38,9 +39,9 @@ pub const LivenessKeyContext = struct {
                 hasher.update("t");
                 hasher.update(std.mem.asBytes(&id));
             },
-            .variable => |name| {
-                hasher.update("v");
-                hasher.update(name);
+            .local => |id| {
+                hasher.update("l");
+                hasher.update(std.mem.asBytes(&id));
             },
         }
         return hasher.final();
@@ -50,10 +51,10 @@ pub const LivenessKeyContext = struct {
         return switch (a) {
             .temp => |a_id| switch (b) {
                 .temp => |b_id| a_id == b_id,
-                .variable => false,
+                .local => false,
             },
-            .variable => |a_name| switch (b) {
-                .variable => |b_name| std.mem.eql(u8, a_name, b_name),
+            .local => |a_id| switch (b) {
+                .local => |b_id| a_id == b_id,
                 .temp => false,
             },
         };
@@ -106,7 +107,7 @@ pub const BlockInfo = struct {
         while (it.next()) |key| {
             switch (key.*) {
                 .temp => |id| try writer.print("t{d} ", .{id}),
-                .variable => |name| try writer.print("{s} ", .{name}),
+                .local => |name| try writer.print("local({d}) ", .{name}),
             }
         }
         try writer.print("}}\n", .{});
@@ -220,7 +221,7 @@ fn terminatorInput(term: ir.Terminator) ?ir.Operand {
 fn operandToKey(op: ir.Operand) ?LivenessKey {
     return switch (op.value) {
         .temp => |id| LivenessKey{ .temp = id },
-        .variable => |name| LivenessKey{ .variable = name },
+        .local => |id| LivenessKey{ .local = id },
         else => null,
     };
 }

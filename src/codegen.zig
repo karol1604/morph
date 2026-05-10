@@ -73,7 +73,7 @@ pub const CodeGen = struct {
 
     fn generateFunction(self: *CodeGen, func: ir.IRFunction) !void {
         const live_intervals = try liveness.analyze(&func, self.ctx.allocator);
-        std.debug.print("Liveness info for function {s}:\n", .{func.name});
+        std.debug.print("Liveness info for function {s}:\n", .{func.debug_name});
 
         var reg_alloc = try RegisterAllocator.init(live_intervals, self.ctx.allocator);
 
@@ -85,7 +85,11 @@ pub const CodeGen = struct {
                 @panic("more than 8 params not yet supported");
             }
 
-            const key = liveness.LivenessKey{ .variable = param.toString() };
+            const key: liveness.LivenessKey = switch (param.value) {
+                .local => |id| .{ .local = id },
+                .temp => |id| .{ .temp = id },
+                else => @panic("unsupported parameter operand type"),
+            };
 
             if (findInterval(live_intervals, key)) |interval| {
                 if (intervalSpansCallSite(interval, call_sites)) {
@@ -180,7 +184,7 @@ pub const CodeGen = struct {
             const src = ra.ARGUMENT_REGISTERS[idx].name;
 
             const key: liveness.LivenessKey = switch (param.value) {
-                .variable => |name| .{ .variable = name },
+                .local => |name| .{ .local = name },
                 .temp => |id| .{ .temp = id },
                 else => continue,
             };
@@ -214,7 +218,12 @@ pub const CodeGen = struct {
 
     fn emitFunction(self: *CodeGen, func: ir.IRFunction, frame_size: usize) !void {
         // try self.emit("{s}:   ; param count: {d}\n", .{ func.name, func.params.items.len });
-        try self.emit("{s}:\n", .{func.name});
+        // try self.emit("{s}:\n", .{func.debug_name});
+        const function_label = switch (func.id) {
+            .main => "_main",
+            .user => |id| self.functionLabel(self.ctx.debug_names.getFunctionName(id).?, func.id),
+        };
+        try self.emit("{s}:\n", .{function_label});
 
         self.current_frame_size = frame_size;
         try self.emitPrologue(self.current_frame_size, self.current_callee_saved);
@@ -228,7 +237,7 @@ pub const CodeGen = struct {
         try self.emitParamHomes(func);
 
         for (func.blocks.items, 0..) |block, i| {
-            try self.emitBlock(block, func.name, i == 0);
+            try self.emitBlock(block, function_label, i == 0);
         }
         try self.emit("\n", .{});
     }
@@ -253,7 +262,7 @@ pub const CodeGen = struct {
     fn resolveRegister(self: *CodeGen, op: ir.Operand) []const u8 {
         const key: liveness.LivenessKey = switch (op.value) {
             .temp => |id| .{ .temp = id },
-            .variable => |name| .{ .variable = name },
+            .local => |name| .{ .local = name },
             else => std.debug.panic("unsupported operand type for register resolution {f}", .{op}),
         };
         const alloc = self.allocations.?.get(key) orelse @panic("no allocation for operand");
@@ -273,7 +282,7 @@ pub const CodeGen = struct {
                 try self.emit("    mov {s}, #{d}\n", .{ dest_reg.toString(), @intFromBool(b) });
                 return dest_reg;
             },
-            .variable, .temp => {
+            .local, .temp => {
                 switch (self.resolve(operand)) {
                     .reg => |reg| return reg.name, // already in a register
                     .stack => |offset| {
@@ -288,6 +297,16 @@ pub const CodeGen = struct {
         }
     }
 
+    fn functionLabel(self: *CodeGen, prefix: []const u8, id: ir.IRFunctionId) []const u8 {
+        switch (id) {
+            .main => return "_main",
+            .user => |uid| {
+                return std.fmt.allocPrint(self.ctx.allocator, "{s}${d}", .{ prefix, uid }) catch
+                    @panic("failed to allocate label");
+            },
+        }
+    }
+
     fn emitInstr(self: *CodeGen, instr: ir.Instr) !void {
         // TODO: abstract these to functions
         switch (instr) {
@@ -299,7 +318,7 @@ pub const CodeGen = struct {
                     .bool => |b| try self.emit("    mov {s}, #{d}\n", .{
                         d.reg.toString(), @intFromBool(b),
                     }),
-                    .variable, .temp => {
+                    .local, .temp => {
                         const s_scratch = self.scratch.borrow();
                         defer self.scratch.release(s_scratch);
 
@@ -449,7 +468,12 @@ pub const CodeGen = struct {
                 }
             },
             .call => |op| {
-                const callee = if (std.mem.eql(u8, op.callee, "printInt$0")) "_print_int" else op.callee;
+                const callee_name = self.ctx.debug_names.getFunctionName(op.callee_id).?;
+                const callee = if (std.mem.eql(u8, callee_name, "printInt"))
+                    "_print_int"
+                else
+                    self.functionLabel(callee_name, .{ .user = op.callee_id });
+
                 try self.emit(
                     "    ; call {s}({d} args)[{f}]\n",
                     .{ callee, op.args.len, op.result },
@@ -483,12 +507,16 @@ pub const CodeGen = struct {
                 try self.store(op.result, .x0);
             },
             .tail_call => |op| {
-                const is_extern = std.mem.eql(u8, op.callee, "printInt$0");
-                const callee = if (is_extern) "_print_int" else op.callee;
+                const callee_name = self.ctx.debug_names.getFunctionName(op.callee_id).?;
+                const is_extern = std.mem.eql(u8, callee_name, "printInt");
+                const callee = if (is_extern)
+                    "_print_int"
+                else
+                    self.functionLabel(callee_name, .{ .user = op.callee_id });
 
                 try self.emit(
                     "    ; tail call {s}({d} args)\n",
-                    .{ op.callee, op.args.len },
+                    .{ callee, op.args.len },
                 );
 
                 if (op.args.len > ra.ARGUMENT_REGISTERS.len) {
@@ -621,7 +649,7 @@ pub const CodeGen = struct {
                         .bool = .{ .dst = dst, .value = b },
                     }) catch @panic("failed to append delayed bool arg");
                 },
-                .variable, .temp => {
+                .local, .temp => {
                     switch (self.resolve(arg)) {
                         .reg => |reg| {
                             if (!std.mem.eql(u8, reg.name.toString(), dst.toString())) {
@@ -686,7 +714,7 @@ pub const CodeGen = struct {
     fn resolve(self: *const CodeGen, operand: ir.Operand) ra.PhysicalLocation {
         const key: liveness.LivenessKey = switch (operand.value) {
             .temp => |id| .{ .temp = id },
-            .variable => |name| .{ .variable = name },
+            .local => |name| .{ .local = name },
             else => std.debug.panic(
                 "resolve: operand {f} has no allocation key\n",
                 .{operand},

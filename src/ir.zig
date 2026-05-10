@@ -3,6 +3,7 @@ const context = @import("context.zig");
 const checked_ast = @import("checked_ast.zig");
 const type_store = @import("type_store.zig");
 const tca = @import("tail_call_analyzer.zig");
+const ids = @import("ids.zig");
 
 const TempId = usize;
 
@@ -11,8 +12,8 @@ const Value = union(enum) {
     unit,
     int: i64,
     bool: bool,
-    variable: []const u8,
-    function: []const u8,
+    local: ids.LocalId,
+    function: ids.FunctionId,
 };
 
 pub const Operand = struct {
@@ -25,8 +26,8 @@ pub const Operand = struct {
             .unit => try writer.print("()", .{}),
             .int => |i| try writer.print("{d}", .{i}),
             .bool => |b| try writer.print("{s}", .{if (b) "true" else "false"}),
-            .variable => |name| try writer.print("{s}", .{name}),
-            .function => |name| try writer.print("{s}", .{name}),
+            .local => |id| try writer.print("local({d})", .{id}),
+            .function => |id| try writer.print("function({d})", .{id}),
         };
     }
 
@@ -38,8 +39,10 @@ pub const Operand = struct {
             .int => |i| std.fmt.allocPrint(std.heap.page_allocator, "{d}", .{i}) catch
                 @panic("Failed to format int operand"),
             .bool => |b| if (b) "true" else "false",
-            .variable => |name| name,
-            .function => |name| name,
+            .local => |id| std.fmt.allocPrint(std.heap.page_allocator, "local({d})", .{id}) catch
+                @panic("Failed to format local operand"),
+            .function => |id| std.fmt.allocPrint(std.heap.page_allocator, "function({d})", .{id}) catch
+                @panic("Failed to format function operand"),
         };
     }
 };
@@ -47,11 +50,11 @@ pub const Operand = struct {
 pub const Terminator = union(enum) {
     @"return": Operand,
     exit: Operand,
-    jump: usize, // target block id
+    jump: ids.BlockId, // target block id
     cond_jump: struct {
         condition: Operand,
-        true_target: usize,
-        false_target: usize,
+        true_target: ids.BlockId,
+        false_target: ids.BlockId,
     },
 
     pub fn format(self: Terminator, writer: *std.Io.Writer) !void {
@@ -87,14 +90,19 @@ pub const BasicBlock = struct {
     }
 };
 
+pub const IRFunctionId = union(enum) {
+    main,
+    user: ids.FunctionId,
+};
 pub const IRFunction = struct {
-    name: []const u8,
+    id: IRFunctionId,
+    debug_name: []const u8,
     params: std.ArrayList(Operand) = .empty,
     blocks: std.ArrayList(BasicBlock) = .empty,
     entry_block_id: usize,
 
     pub fn format(self: IRFunction, writer: *std.Io.Writer) !void {
-        try writer.print("Function {s}:\n", .{self.name});
+        try writer.print("Function {s}:\n", .{self.debug_name});
         for (self.blocks.items) |block| {
             try writer.print("    {f}\n", .{block});
         }
@@ -166,11 +174,11 @@ pub const Instr = union(enum) {
     },
     call: struct {
         result: Operand,
-        callee: []const u8,
+        callee_id: ids.FunctionId,
         args: []Operand,
     },
     tail_call: struct {
-        callee: []const u8,
+        callee_id: ids.FunctionId,
         args: []Operand,
     },
 
@@ -229,7 +237,7 @@ pub const Instr = union(enum) {
                 .{ ge.result, ge.left, ge.right },
             ),
             .call => |c| {
-                try writer.print("{f} := call {s}(", .{ c.result, c.callee });
+                try writer.print("{f} := call {d}(", .{ c.result, c.callee_id });
                 for (c.args, 0..) |arg, i| {
                     try writer.print("{f}", .{arg});
                     if (i < c.args.len - 1) try writer.print(", ", .{});
@@ -240,14 +248,10 @@ pub const Instr = union(enum) {
     }
 };
 
-const Variable = struct {
-    name: []const u8,
-    type_id: type_store.TypeId,
-};
-
 pub const IRGen = struct {
     ctx: *context.CompilerContext,
-    variables: std.ArrayList(Variable) = .empty,
+    /// map from local variable id to type id
+    locals: std.AutoHashMap(ids.LocalId, usize),
     temp_id: usize = 0,
     tail_calls: *const tca.TailCallSet,
 
@@ -260,11 +264,12 @@ pub const IRGen = struct {
         return IRGen{
             .ctx = ctx,
             .tail_calls = tail_calls,
+            .locals = std.AutoHashMap(ids.LocalId, usize).init(ctx.allocator),
         };
     }
 
     pub fn generate(self: *IRGen, exprs: []const *checked_ast.CheckedExpr) !void {
-        try self.createFunction("_main", null);
+        try self.createFunction("_main", .main);
         const exit_code = if (exprs.len > 0) blk: {
             for (exprs[0 .. exprs.len - 1]) |expr| {
                 _ = try self.genExpr(expr);
@@ -285,28 +290,21 @@ pub const IRGen = struct {
         };
 
         self.setTerminator(.{ .exit = exit_code });
-
-        // const f_idx = self.currentFuncIdx.?;
-        // const b_idx = self.currentBlockIdx.?;
-        // if (self.functions.items[f_idx].blocks.items[b_idx].terminator == null) {
-        //     self.functions.items[f_idx].blocks.items[b_idx].terminator = .{ .Return = null };
-        // }
-
-        // return self.instructions.toOwnedSlice(self.ctx.allocator);
     }
 
-    fn createFunction(self: *IRGen, name: []const u8, id: ?usize) !void {
+    fn createFunction(self: *IRGen, name: []const u8, id: IRFunctionId) !void {
         var func_name: []const u8 = name;
-        if (id) |i| {
-            func_name = try std.fmt.allocPrint(self.ctx.allocator, "{s}${d}", .{ name, i });
+        switch (id) {
+            .main => func_name = "_main",
+            .user => {},
         }
-        // const id = self.nextFuncId;
-        // self.nextFuncId += 1;
 
         const func = IRFunction{
-            .name = func_name,
+            .id = id,
+            .debug_name = func_name,
             .entry_block_id = self.next_block_idx,
         };
+
         try self.functions.append(self.ctx.allocator, func);
         self.current_func_idx = self.functions.items.len - 1;
         const entry_id = try self.createBlock(); // create entry block
@@ -348,24 +346,6 @@ pub const IRGen = struct {
         self.functions.items[f_idx].blocks.items[b_idx].terminator = terminator;
     }
 
-    fn addVariable(self: *IRGen, name: []const u8, id: usize, type_id: usize) !void {
-        const n = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ name, id });
-        try self.variables.append(self.ctx.allocator, Variable{
-            .name = n,
-            .type_id = type_id,
-        });
-    }
-
-    fn lookupVariable(self: *IRGen, name: []const u8, id: usize) ?Variable {
-        const full_name = std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{ name, id }) catch return null;
-        for (self.variables.items) |v| {
-            if (std.mem.eql(u8, v.name, full_name)) {
-                return v;
-            }
-        }
-        return null;
-    }
-
     // TODO: too long, split into multiple functions
     fn genExpr(self: *IRGen, expr: *const checked_ast.CheckedExpr) !Operand {
         switch (expr.kind) {
@@ -378,10 +358,10 @@ pub const IRGen = struct {
                 .type_id = self.ctx.typeStore().builtins.bool,
             },
             .identifier => |ident| {
-                const v = self.lookupVariable(ident.name, ident.id) orelse return error.UndefinedVariable;
+                const tid = self.locals.get(ident.local_id) orelse return error.UndefinedVariable;
                 return Operand{
-                    .value = .{ .variable = v.name },
-                    .type_id = v.type_id,
+                    .value = .{ .local = ident.local_id },
+                    .type_id = tid,
                 };
             },
             .unit_literal => return Operand{
@@ -613,29 +593,15 @@ pub const IRGen = struct {
             },
             .variable_decl => |decl| { // TODO: finish
                 const val = try self.genExpr(decl.value);
-                const name = try std.fmt.allocPrint(
-                    self.ctx.allocator,
-                    "{s}#{d}",
-                    .{ decl.name, decl.id },
-                );
-
-                // try self.instructions.append(self.ctx.allocator, Instr{ .Assign = .{
-                //     .target = Operand{
-                //         .value = .{ .Variable = name },
-                //         .type = val.type,
-                //     },
-                //     .value = val,
-                // } });
+                try self.locals.put(decl.local_id, val.type_id);
 
                 try self.emit(Instr{ .assign = .{
                     .target = Operand{
-                        .value = .{ .variable = name },
+                        .value = .{ .local = decl.local_id },
                         .type_id = val.type_id,
                     },
                     .value = val,
                 } });
-
-                try self.addVariable(decl.name, decl.id, val.type_id);
 
                 return Operand{
                     .value = .unit,
@@ -645,38 +611,32 @@ pub const IRGen = struct {
             .func_decl => |func| {
                 const prev_func_idx = self.current_func_idx;
                 const prev_block_idx = self.current_block_idx;
+                const prev_locals = self.locals;
 
-                try self.createFunction(func.name, func.id);
+                self.locals = std.AutoHashMap(usize, usize).init(self.ctx.allocator);
+                defer {
+                    self.locals.deinit();
+                    self.current_func_idx = prev_func_idx;
+                    self.current_block_idx = prev_block_idx;
+                    self.locals = prev_locals;
+                }
+
+                try self.createFunction(func.name, .{ .user = func.function_id });
 
                 for (func.params) |param| {
+                    try self.locals.put(param.local_id, param.type_id);
                     const param_op = Operand{
-                        .value = .{ .variable = try std.fmt.allocPrint(self.ctx.allocator, "{s}#{d}", .{
-                            param.name,
-                            param.id,
-                        }) },
+                        .value = .{ .local = param.local_id },
                         .type_id = param.type_id,
                     };
                     try self.functions.items[self.current_func_idx.?].params.append(self.ctx.allocator, param_op);
-                    try self.addVariable(param.name, param.id, param_op.type_id);
                 }
 
                 const body_op = try self.genExpr(func.body);
                 self.setTerminator(.{ .@"return" = body_op });
 
-                // try self.emit(Instr{ .Ret = .{ .value = bodyOp } });
-
-                // self.variables.shrinkRetainingCapacity(prevVarCount);
-                self.current_func_idx = prev_func_idx;
-                self.current_block_idx = prev_block_idx;
-
-                const full_name = try std.fmt.allocPrint(
-                    self.ctx.allocator,
-                    "{s}${d}",
-                    .{ func.name, func.id },
-                );
-
                 return Operand{
-                    .value = .{ .function = full_name },
+                    .value = .{ .function = func.function_id },
                     .type_id = expr.type_id, // NOTE: is this correct?
                 };
             },
@@ -699,29 +659,20 @@ pub const IRGen = struct {
                     .type_id = expr.type_id,
                 };
 
-                const full_name = try std.fmt.allocPrint(
-                    self.ctx.allocator,
-                    "{s}${d}",
-                    .{ call.callee, call.function_id },
-                );
+                const callee_id = call.function_id;
 
                 if (self.tail_calls.contains(call.call_id)) {
                     try self.emit(Instr{ .tail_call = .{
-                        .callee = full_name,
+                        .callee_id = callee_id,
                         .args = try arg_ops.toOwnedSlice(self.ctx.allocator),
                     } });
 
                     return result_op;
-                    // dummy return
-                    // return Operand{
-                    //     .value = .unit,
-                    //     .type_id = self.ctx.typeStore().builtins.unit,
-                    // };
                 }
 
                 try self.emit(Instr{ .call = .{
                     .result = result_op,
-                    .callee = full_name,
+                    .callee_id = callee_id,
                     .args = try arg_ops.toOwnedSlice(self.ctx.allocator),
                 } });
 
@@ -804,8 +755,8 @@ pub const IRGen = struct {
             .unit => std.debug.print("()", .{}),
             .int => |i| std.debug.print("{d}", .{i}),
             .bool => |b| std.debug.print("{s}", .{if (b) "true" else "false"}),
-            .variable => |n| std.debug.print("{s}", .{n}),
-            .function => |n| std.debug.print("{s}", .{n}),
+            .local => |id| std.debug.print("local({d})", .{id}),
+            .function => |id| std.debug.print("function({d})", .{id}),
         }
         std.debug.print(" : {s}", .{ts.formatTypeName(op.type_id)});
     }
@@ -900,7 +851,7 @@ pub const IRGen = struct {
             },
             .call => |x| {
                 dumpOperand(x.result, ts);
-                std.debug.print(" := call {s}(", .{x.callee});
+                std.debug.print(" := call {d}(", .{x.callee_id});
                 for (x.args, 0..) |arg, i| {
                     dumpOperand(arg, ts);
                     if (i < x.args.len - 1) std.debug.print(", ", .{});
@@ -908,7 +859,7 @@ pub const IRGen = struct {
                 std.debug.print(")", .{});
             },
             .tail_call => |x| {
-                std.debug.print("tail call {s}(", .{x.callee});
+                std.debug.print("tail call {d}(", .{x.callee_id});
                 for (x.args, 0..) |arg, i| {
                     dumpOperand(arg, ts);
                     if (i < x.args.len - 1) std.debug.print(", ", .{});
@@ -944,7 +895,7 @@ pub const IRGen = struct {
     }
 
     fn dumpFunction(func: IRFunction, ts: *const type_store.TypeStore) void {
-        std.debug.print("Function {s}", .{func.name});
+        std.debug.print("Function {s}", .{func.debug_name});
         if (func.params.items.len > 0) {
             std.debug.print("(", .{});
             for (func.params.items, 0..) |p, i| {

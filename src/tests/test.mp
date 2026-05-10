@@ -20,6 +20,7 @@ fact n => {
 }
 
 let a ∈ Int = 10
+let b = 1212
 count_helper(a, 0)
 
 

@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const TypeId = @import("type_store.zig").TypeId;
 const Span = @import("span.zig").Span;
+const ids = @import("ids.zig");
 
 pub const CheckedTypeExpr = struct {
     type_id: TypeId,
@@ -17,7 +18,7 @@ pub const CheckedExpr = struct {
 pub const Param = struct {
     name: []const u8,
     type_id: TypeId,
-    id: usize, // unique id for this parameter
+    local_id: ids.LocalId, // unique id for this parameter
 };
 
 pub const CheckedExprKind = union(enum) {
@@ -26,7 +27,7 @@ pub const CheckedExprKind = union(enum) {
     unit_literal,
     identifier: struct {
         name: []const u8,
-        id: usize, // unique id for this variable
+        local_id: ids.LocalId, // unique id for this variable
     },
 
     unary: struct {
@@ -43,7 +44,7 @@ pub const CheckedExprKind = union(enum) {
     variable_decl: struct {
         name: []const u8,
         value: *const CheckedExpr,
-        id: usize, // unique id for this variable
+        local_id: ids.LocalId, // unique id for this variable
     },
 
     block: struct {
@@ -61,14 +62,14 @@ pub const CheckedExprKind = union(enum) {
         name: []const u8,
         body: *const CheckedExpr,
         params: []const Param,
-        id: usize, // unique id for this function
+        function_id: ids.FunctionId, // unique id for this function
     },
 
     func_call: struct {
-        callee: []const u8,
+        callee_name: []const u8,
         args: []const *const CheckedExpr,
-        function_id: usize, // unique id for the function being called
-        call_id: usize, // unique id for this call site (for tail call analysis)
+        function_id: ids.FunctionId, // unique id for the function being called
+        call_id: ids.CallId, // unique id for this call site (for tail call analysis)
     },
 
     @"if": struct {

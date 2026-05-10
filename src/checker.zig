@@ -66,7 +66,7 @@ pub const Checker = struct {
     scopes: std.ArrayList(*Scope),
     global_scope: *Scope,
     type_store: TypeStore,
-    next_var_id: usize = 0,
+    next_id: usize = 0,
     next_call_id: usize = 0,
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
@@ -91,11 +91,12 @@ pub const Checker = struct {
             .codomain = type_arena.builtins.unit,
         } });
 
+        const id = checker.getNewId();
         try checker.global_scope.defineSymbol(type_store.Symbol{
             .name = "printInt",
             .type_id = print_int_type_id,
-            .kind = .Function,
-            .id = checker.getNewVarId(),
+            .kind = .function,
+            .id = id,
             .span = Span{
                 .start = span_.Location{ .col = 0, .line = 0, .offset = 0 },
                 .end = span_.Location{ .col = 0, .line = 0, .offset = 0 },
@@ -103,6 +104,7 @@ pub const Checker = struct {
             .domain_span = null,
             .codomain_span = null,
         });
+        try checker.ctx.debug_names.addFunctionName(id, "printInt");
 
         return checker;
         // return Checker{
@@ -268,7 +270,7 @@ pub const Checker = struct {
             return try self.typedExpr(
                 .{
                     .func_call = .{
-                        .callee = func_call.callee,
+                        .callee_name = func_call.callee,
                         .args = &[_]*const CheckedExpr{},
                         .function_id = 0, // NOTE: id doesn't matter since it's error-typed
                         .call_id = 0,
@@ -280,7 +282,7 @@ pub const Checker = struct {
             );
         }
 
-        if (func_sym.?.kind != .Function) {
+        if (func_sym.?.kind != .function) {
             var d = DiagnosticBuilder.err(self.ctx, "symbol `{s}` is not a function", .{func_call.callee});
             _ = d.primaryLabel(expr.span, "call found here", .{})
                 .note(
@@ -291,7 +293,7 @@ pub const Checker = struct {
             return try self.typedExpr(
                 .{
                     .func_call = .{
-                        .callee = func_call.callee,
+                        .callee_name = func_call.callee,
                         .args = &[_]*const CheckedExpr{},
                         .function_id = 0, // NOTE: id doesn't matter since it's error-typed
                         .call_id = 0,
@@ -339,7 +341,7 @@ pub const Checker = struct {
         return try self.typedExpr(
             .{
                 .func_call = .{
-                    .callee = func_call.callee,
+                    .callee_name = func_call.callee,
                     .args = checked_args,
                     .function_id = func_sym.?.id,
                     .call_id = self.getNewCallId(),
@@ -356,7 +358,7 @@ pub const Checker = struct {
         const func_sig = self.currentScope().lookupSymbol(func_def.name);
 
         if (func_sig) |sym| {
-            if (sym.kind != .Function) {
+            if (sym.kind != .function) {
                 var d = DiagnosticBuilder.err(
                     self.ctx,
                     "symbol `{s}` already declared and is not a function",
@@ -374,7 +376,7 @@ pub const Checker = struct {
                             .name = func_def.name,
                             .body = undefined,
                             .params = undefined,
-                            .id = sym.id,
+                            .function_id = sym.id,
                         },
                     },
                     self.type_store.builtins.err,
@@ -401,7 +403,7 @@ pub const Checker = struct {
                         .name = func_def.name,
                         .body = undefined,
                         .params = undefined,
-                        .id = 0, // id doesn't matter since it's error-typed
+                        .function_id = 0, // id doesn't matter since it's error-typed
                     },
                 },
                 self.type_store.builtins.err,
@@ -429,7 +431,7 @@ pub const Checker = struct {
                     .name = func_def.name,
                     .body = undefined,
                     .params = undefined,
-                    .id = func_sig.?.id,
+                    .function_id = func_sig.?.id,
                 } },
                 self.type_store.builtins.err,
                 null,
@@ -448,23 +450,24 @@ pub const Checker = struct {
 
         for (params, 0..) |paramTypeId, idx| {
             const param_name = func_def.params[idx];
-            const id = self.getNewVarId();
+            const id = self.getNewId();
 
             try checked_params.append(self.ctx.allocator, .{
                 .name = param_name,
                 .type_id = paramTypeId,
-                .id = id,
+                .local_id = id,
             });
             const param_sym = type_store.Symbol{
                 .name = param_name,
                 .type_id = paramTypeId,
-                .kind = .Variable,
+                .kind = .variable,
                 .id = id,
                 .span = expr.span, // FIXME: add spans to params
                 .domain_span = null,
                 .codomain_span = null,
             };
             try self.currentScope().defineSymbol(param_sym);
+            try self.ctx.debug_names.addLocalName(param_sym.id, param_name);
         }
 
         const return_exp = TypeExpectation{
@@ -479,7 +482,7 @@ pub const Checker = struct {
                 .name = func_def.name,
                 .body = body_checked,
                 .params = try checked_params.toOwnedSlice(self.ctx.allocator),
-                .id = func_sig.?.id,
+                .function_id = func_sig.?.id,
             } },
             func_sig.?.type_id,
             null,
@@ -542,11 +545,11 @@ pub const Checker = struct {
             .{ func_sig.name, func_type_id, self.type_store.types.items[func_type_id].function },
         );
 
-        const id = self.getNewVarId();
+        const id = self.getNewId();
         const func_sym = type_store.Symbol{
             .name = func_sig.name,
             .type_id = func_type_id,
-            .kind = .Function,
+            .kind = .function,
             .id = id,
             .span = expr.span,
             .domain_span = domain.span,
@@ -567,6 +570,7 @@ pub const Checker = struct {
             },
             else => return err,
         };
+        try self.ctx.debug_names.addFunctionName(func_sym.id, func_sig.name);
 
         return try self.typedExpr(
             .{
@@ -668,7 +672,7 @@ pub const Checker = struct {
 
             // Return a dummy expr of error type
             return try self.typedExpr(
-                .{ .identifier = .{ .name = ident_name, .id = 0 } }, // NOTE: id doesn't matter since it's error-typed
+                .{ .identifier = .{ .name = ident_name, .local_id = 0 } }, // NOTE: id doesn't matter since it's error-typed
                 self.type_store.builtins.err,
                 null,
                 expr.span,
@@ -680,7 +684,7 @@ pub const Checker = struct {
             self.type_store.formatTypeName(symbol.?.type_id),
         });
         return try self.typedExpr(
-            .{ .identifier = .{ .name = ident_name, .id = symbol.?.id } },
+            .{ .identifier = .{ .name = ident_name, .local_id = symbol.?.id } },
             symbol.?.type_id,
             type_exp,
             expr.span,
@@ -733,7 +737,7 @@ pub const Checker = struct {
 
         const value_checked = try self.checkExpr(var_decl.value, value_exp);
 
-        const id = self.getNewVarId();
+        const id = self.getNewId();
 
         var result_type: TypeId = self.type_store.builtins.unit;
         if (self.type_store.resolve(var_decl.name)) |_| {
@@ -767,7 +771,7 @@ pub const Checker = struct {
             .{ .variable_decl = .{
                 .name = var_decl.name,
                 .value = value_checked,
-                .id = id,
+                .local_id = id,
             } },
             result_type,
             null,
@@ -793,7 +797,7 @@ pub const Checker = struct {
         const symbol = type_store.Symbol{
             .name = name,
             .type_id = type_id,
-            .kind = .Variable,
+            .kind = .variable,
             .id = id,
             .span = span,
             .domain_span = null,
@@ -801,6 +805,7 @@ pub const Checker = struct {
         };
 
         try self.currentScope().defineSymbol(symbol);
+        try self.ctx.debug_names.addLocalName(symbol.id, name);
     }
 
     fn checkBinaryExpr(
@@ -1023,9 +1028,9 @@ pub const Checker = struct {
         });
     }
 
-    fn getNewVarId(self: *Checker) usize {
-        const id = self.next_var_id;
-        self.next_var_id += 1;
+    fn getNewId(self: *Checker) usize {
+        const id = self.next_id;
+        self.next_id += 1;
         return id;
     }
 

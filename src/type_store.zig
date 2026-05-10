@@ -1,6 +1,7 @@
 const std = @import("std");
 pub const TypeId = usize;
 const Span = @import("span.zig").Span;
+const ids = @import("ids.zig");
 
 pub const BuiltinTypes = struct {
     unit: TypeId,
@@ -175,10 +176,10 @@ pub const TypeStore = struct {
 pub const Symbol = struct {
     name: []const u8,
     type_id: TypeId,
-    id: usize, // unique id for this symbol (e.g. variable id or function id)
+    id: usize, // unique id for this symbol (variable or function)
     kind: enum {
-        Variable,
-        Function,
+        variable,
+        function,
     },
     span: Span,
     domain_span: ?Span, // Only used for functions to indicate the parameter type annotation span

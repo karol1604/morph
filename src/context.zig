@@ -3,6 +3,35 @@ const Span = @import("span.zig").Span;
 const diag = @import("diagnostic.zig");
 const zspan = @import("zspan");
 const TypeStore = @import("type_store.zig").TypeStore;
+const ids = @import("ids.zig");
+
+pub const DebugNames = struct {
+    function_names: std.AutoHashMap(ids.FunctionId, []const u8),
+    local_names: std.AutoHashMap(ids.LocalId, []const u8),
+
+    pub fn init(allocator: std.mem.Allocator) DebugNames {
+        return DebugNames{
+            .function_names = std.AutoHashMap(ids.FunctionId, []const u8).init(allocator),
+            .local_names = std.AutoHashMap(ids.LocalId, []const u8).init(allocator),
+        };
+    }
+
+    pub fn addFunctionName(self: *DebugNames, id: ids.FunctionId, name: []const u8) !void {
+        try self.function_names.put(id, name);
+    }
+
+    pub fn addLocalName(self: *DebugNames, id: ids.LocalId, name: []const u8) !void {
+        try self.local_names.put(id, name);
+    }
+
+    pub fn getFunctionName(self: *const DebugNames, id: ids.FunctionId) ?[]const u8 {
+        return self.function_names.get(id);
+    }
+
+    pub fn getLocalName(self: *const DebugNames, id: ids.LocalId) ?[]const u8 {
+        return self.local_names.get(id);
+    }
+};
 
 pub const CompilerContext = struct {
     allocator: std.mem.Allocator,
@@ -11,6 +40,7 @@ pub const CompilerContext = struct {
     source_file: zspan.SourceFile,
     source: []const u8,
     type_store: ?*const TypeStore,
+    debug_names: DebugNames,
 
     pub fn init(
         arena: *std.heap.ArenaAllocator,
@@ -24,6 +54,7 @@ pub const CompilerContext = struct {
             .diagnostics = .empty,
             .source_file = zspan.SourceFile.init(name, source_code, arena.allocator()),
             .type_store = null,
+            .debug_names = DebugNames.init(arena.allocator()),
         };
     }
 
