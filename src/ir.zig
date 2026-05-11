@@ -50,6 +50,10 @@ pub const Operand = struct {
 pub const Terminator = union(enum) {
     @"return": Operand,
     exit: Operand,
+    tail_call: struct {
+        callee_id: ids.FunctionId,
+        args: []Operand,
+    },
     jump: ids.BlockId, // target block id
     cond_jump: struct {
         condition: Operand,
@@ -61,6 +65,14 @@ pub const Terminator = union(enum) {
         return switch (self) {
             .@"return" => |value| try writer.print("return {f}", .{value}),
             .exit => |code| try writer.print("exit {f}", .{code}),
+            .tail_call => |x| {
+                try writer.print("tail call {d}(", .{x.callee_id});
+                for (x.args, 0..) |arg, i| {
+                    try writer.print("{f}", .{arg});
+                    if (i < x.args.len - 1) try writer.print(", ", .{});
+                }
+                try writer.print(")", .{});
+            },
             .jump => |target| try writer.print("jump Block {d}", .{target}),
             .cond_jump => |cj| try writer.print(
                 "if {f} then jump Block {d} else jump Block {d}",
@@ -344,6 +356,12 @@ pub const IRGen = struct {
         const f_idx = self.current_func_idx.?;
         const b_idx = self.current_block_idx.?;
         self.functions.items[f_idx].blocks.items[b_idx].terminator = terminator;
+    }
+
+    fn currentBlockTerminated(self: *IRGen) bool {
+        const f_idx = self.current_func_idx.?;
+        const b_idx = self.current_block_idx.?;
+        return self.functions.items[f_idx].blocks.items[b_idx].terminator != null;
     }
 
     // TODO: too long, split into multiple functions
@@ -633,7 +651,9 @@ pub const IRGen = struct {
                 }
 
                 const body_op = try self.genExpr(func.body);
-                self.setTerminator(.{ .@"return" = body_op });
+                if (!self.currentBlockTerminated()) {
+                    self.setTerminator(.{ .@"return" = body_op });
+                }
 
                 return Operand{
                     .value = .{ .function = func.function_id },
@@ -662,7 +682,7 @@ pub const IRGen = struct {
                 const callee_id = call.function_id;
 
                 if (self.tail_calls.contains(call.call_id)) {
-                    try self.emit(Instr{ .tail_call = .{
+                    self.setTerminator(.{ .tail_call = .{
                         .callee_id = callee_id,
                         .args = try arg_ops.toOwnedSlice(self.ctx.allocator),
                     } });
@@ -703,22 +723,26 @@ pub const IRGen = struct {
 
                 try self.switchToBlock(then_block_id);
                 const then_op = try self.genExpr(i.then_branch);
-                if (i.else_branch) |_| {
-                    try self.emit(Instr{ .assign = .{
-                        .target = result_op,
-                        .value = then_op,
-                    } });
+                if (!self.currentBlockTerminated()) {
+                    if (i.else_branch) |_| {
+                        try self.emit(Instr{ .assign = .{
+                            .target = result_op,
+                            .value = then_op,
+                        } });
+                    }
+                    self.setTerminator(.{ .jump = merge_block_id });
                 }
-                self.setTerminator(.{ .jump = merge_block_id });
 
                 if (i.else_branch) |elseBranch| {
                     try self.switchToBlock(else_block_id);
                     const else_op = try self.genExpr(elseBranch);
-                    try self.emit(Instr{ .assign = .{
-                        .target = result_op,
-                        .value = else_op,
-                    } });
-                    self.setTerminator(.{ .jump = merge_block_id });
+                    if (!self.currentBlockTerminated()) {
+                        try self.emit(Instr{ .assign = .{
+                            .target = result_op,
+                            .value = else_op,
+                        } });
+                        self.setTerminator(.{ .jump = merge_block_id });
+                    }
                 }
 
                 try self.switchToBlock(merge_block_id);
@@ -880,6 +904,14 @@ pub const IRGen = struct {
             .exit => |op| {
                 std.debug.print("exit ", .{});
                 dumpOperand(op, ts);
+            },
+            .tail_call => |x| {
+                std.debug.print("tail call {d}(", .{x.callee_id});
+                for (x.args, 0..) |arg, i| {
+                    dumpOperand(arg, ts);
+                    if (i < x.args.len - 1) std.debug.print(", ", .{});
+                }
+                std.debug.print(")", .{});
             },
             .jump => |id| std.debug.print("jump Block {d}", .{id}),
             .cond_jump => |cj| {

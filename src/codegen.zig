@@ -2,6 +2,7 @@ const std = @import("std");
 
 const context = @import("context.zig");
 const Emitter = @import("emitters/emitter.zig").Emitter;
+const ids = @import("ids.zig");
 const ir = @import("ir.zig");
 const liveness = @import("liveness.zig");
 const ra = @import("register_allocator.zig");
@@ -155,11 +156,22 @@ pub const CodeGen = struct {
         for (func.blocks.items) |block| {
             for (block.instructions.items) |instr| {
                 switch (instr) {
-                    .call, .tail_call => call_sites.append(self.ctx.allocator, pos) catch
-                        @panic("failed to append call site"),
+                    .call, .tail_call => call_sites.append(
+                        self.ctx.allocator,
+                        pos,
+                    ) catch @panic("failed to append call site"),
                     else => {},
                 }
                 pos += 1;
+            }
+            if (block.terminator) |term| {
+                switch (term) {
+                    .tail_call => call_sites.append(
+                        self.ctx.allocator,
+                        pos,
+                    ) catch @panic("failed to append call site"),
+                    else => {},
+                }
             }
             pos += 1; // for the terminator
         }
@@ -169,7 +181,7 @@ pub const CodeGen = struct {
 
     fn intervalSpansCallSite(interval: liveness.LiveInterval, call_sites: []const usize) bool {
         for (call_sites) |pos| {
-            if (interval.start < pos and pos < interval.end) return true;
+            if (interval.start <= pos and pos < interval.end) return true;
         }
         return false;
     }
@@ -250,7 +262,10 @@ pub const CodeGen = struct {
     ) !void {
         if (!is_entry) try self.emit("block_{s}_{d}:\n", .{ func_name, block.id });
         for (block.instructions.items) |instr| {
-            try self.emitInstr(instr);
+            if (try self.emitInstr(instr)) {
+                try self.emit("\n", .{});
+                return;
+            }
         }
 
         if (block.terminator) |term| {
@@ -294,7 +309,8 @@ pub const CodeGen = struct {
         }
     }
 
-    fn emitInstr(self: *CodeGen, instr: ir.Instr) !void {
+    /// Returns true when the instruction emits a control-flow terminator.
+    fn emitInstr(self: *CodeGen, instr: ir.Instr) !bool {
         // TODO: abstract these to functions
         switch (instr) {
             .assign => |op| {
@@ -476,28 +492,8 @@ pub const CodeGen = struct {
                 try self.store(op.result, .x0);
             },
             .tail_call => |op| {
-                const callee_name = self.ctx.debug_names.getFunctionName(op.callee_id).?;
-                const is_extern = std.mem.eql(u8, callee_name, "printInt");
-                const callee = if (is_extern)
-                    "_print_int"
-                else
-                    self.functionLabel(callee_name, .{ .user = op.callee_id });
-
-                try self.emit(
-                    "    ; tail call {s}({d} args)\n",
-                    .{ callee, op.args.len },
-                );
-
-                if (op.args.len > ra.ARGUMENT_REGISTERS.len) {
-                    @panic("more than 8 call args not yet supported");
-                }
-
-                try self.emitCallArgs(op.args);
-                try self.emitEpilogue(self.current_frame_size, self.current_callee_saved);
-                if (!is_extern)
-                    try self.emit("    b {s}\n", .{callee})
-                else
-                    try self.emit("    bl {s}\n", .{callee});
+                try self.emitTailCall(op.callee_id, op.args);
+                return true;
             },
             .eq => |op| try self.emitCondition(op.result, op.left, op.right, "eq"),
             .neq => |op| try self.emitCondition(op.result, op.left, op.right, "ne"),
@@ -507,6 +503,7 @@ pub const CodeGen = struct {
             .gt_eq => |op| try self.emitCondition(op.result, op.left, op.right, "ge"),
             // else => @panic("Unsupported instruction type"),
         }
+        return false;
     }
 
     const RegMove = struct { dst: ra.RegisterName, src: ra.RegisterName };
@@ -718,6 +715,7 @@ pub const CodeGen = struct {
                 try self.emitEpilogue(self.current_frame_size, self.current_callee_saved);
                 try self.emit("    ret\n", .{});
             },
+            .tail_call => |op| try self.emitTailCall(op.callee_id, op.args),
             .jump => |target| try self.emit("    b block_{s}_{d}\n", .{ func_name, target }),
             .cond_jump => |cj| {
                 const s = self.scratch.borrow();
@@ -733,6 +731,32 @@ pub const CodeGen = struct {
             },
             // else => @panic("Unsupported terminator type"),
         }
+    }
+
+    fn emitTailCall(
+        self: *CodeGen,
+        callee_id: ids.FunctionId,
+        args: []const ir.Operand,
+    ) !void {
+        const callee_name = self.ctx.debug_names.getFunctionName(callee_id).?;
+        const is_extern = std.mem.eql(u8, callee_name, "printInt");
+        const callee = if (is_extern)
+            "_print_int"
+        else
+            self.functionLabel(callee_name, .{ .user = callee_id });
+
+        try self.emit(
+            "    ; tail call {s}({d} args)\n",
+            .{ callee, args.len },
+        );
+
+        if (args.len > ra.ARGUMENT_REGISTERS.len) {
+            @panic("more than 8 call args not yet supported");
+        }
+
+        try self.emitCallArgs(args);
+        try self.emitEpilogue(self.current_frame_size, self.current_callee_saved);
+        try self.emit("    b {s}\n", .{callee});
     }
 
     fn emit(self: *CodeGen, comptime fmt: []const u8, args: anytype) !void {

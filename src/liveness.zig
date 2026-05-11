@@ -167,7 +167,7 @@ fn buildCFG(
     for (func.blocks.items, 0..) |block, i| {
         const term = block.terminator.?; // TODO: is this safe?
         switch (term) {
-            .@"return", .exit => {
+            .@"return", .exit, .tail_call => {
                 blocks[i].successors = &[_]usize{};
             },
             .jump => |target| {
@@ -209,13 +209,28 @@ fn instrInputsAndOutput(instr: ir.Instr) InstrOperands {
     };
 }
 
-fn terminatorInput(term: ir.Terminator) ?ir.Operand {
-    return switch (term) {
-        .@"return" => |op| op,
-        .exit => |op| op,
-        .jump => null,
-        .cond_jump => |cj| cj.condition,
-    };
+const TerminatorOperands = struct {
+    inputs: [8]?ir.Operand = .{null} ** 8,
+};
+
+fn terminatorInputs(term: ir.Terminator) TerminatorOperands {
+    var result = TerminatorOperands{};
+
+    switch (term) {
+        .@"return", .exit => |op| result.inputs[0] = op,
+        .tail_call => |call| {
+            if (call.args.len > result.inputs.len) {
+                @panic("more than 8 tail call args not yet supported");
+            }
+            for (call.args, 0..) |arg, i| {
+                result.inputs[i] = arg;
+            }
+        },
+        .jump => {},
+        .cond_jump => |cj| result.inputs[0] = cj.condition,
+    }
+
+    return result;
 }
 
 fn operandToKey(op: ir.Operand) ?LivenessKey {
@@ -266,9 +281,12 @@ fn computeUseDefSets(func: *const IRFunction, blocks: []BlockInfo) !void {
             }
         }
         if (block.terminator) |term| {
-            if (terminatorInput(term)) |input| {
-                if (operandToKey(input)) |key| {
-                    if (!blocks[i].def.contains(key)) try blocks[i].use.put(key, {});
+            const term_ops = terminatorInputs(term);
+            for (term_ops.inputs) |input| {
+                if (input) |op| {
+                    if (operandToKey(op)) |key| {
+                        if (!blocks[i].def.contains(key)) try blocks[i].use.put(key, {});
+                    }
                 }
             }
         }
@@ -404,17 +422,20 @@ fn buildIntervals(
         }
 
         if (irBlock.terminator) |term| {
-            if (terminatorInput(term)) |op| {
-                if (operandToKey(op)) |key| {
-                    const entry = try interval_map.getOrPut(key);
-                    if (!entry.found_existing) {
-                        entry.value_ptr.* = LiveInterval{
-                            .key = key,
-                            .start = blockInfo.instr_end, // terminator is after all instructions
-                            .end = blockInfo.instr_end,
-                        };
-                    } else {
-                        entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instr_end);
+            const term_ops = terminatorInputs(term);
+            for (term_ops.inputs) |input| {
+                if (input) |op| {
+                    if (operandToKey(op)) |key| {
+                        const entry = try interval_map.getOrPut(key);
+                        if (!entry.found_existing) {
+                            entry.value_ptr.* = LiveInterval{
+                                .key = key,
+                                .start = blockInfo.instr_end, // terminator is after all instructions
+                                .end = blockInfo.instr_end,
+                            };
+                        } else {
+                            entry.value_ptr.end = @max(entry.value_ptr.end, blockInfo.instr_end);
+                        }
                     }
                 }
             }
