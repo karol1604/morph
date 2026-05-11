@@ -1,42 +1,26 @@
-let v01 = 1
-let v02 = 2
-let v03 = 3
-let v04 = 4
-let v05 = 5
-let v06 = 6
-let v07 = 7
-let v08 = 8
-let v09 = 9
-let v10 = 10
-let v11 = 11
-let v12 = 12
-let v13 = 13
-let v14 = 14
-let v15 = 15
-let v16 = 16
-let v17 = 17
-let v18 = 18
-let v19 = 19
-let v20 = 20
-let v21 = 21
-let v22 = 22
-let v23 = 23
-let v24 = 24
-let v25 = 25
-let v26 = 26
-let v27 = 27
-let v28 = 28
-let v29 = 29
-let v30 = 30
-let v31 = 31
-let v32 = 32
+count_helper : Int × Int -> Int
+count_helper n acc => {
+    if n <= 0 then acc
+    else count_helper(n - 1, acc + 1)
+}
 
-let final = v01 + v02 + v03 + v04 + v05 + v06 + v07 + v08 + v09 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32
+count : Int -> Int
+count n => count_helper(n, 0)
 
-add : Int × Int -> Int
-add x y => x + y
+count2 : Int -> Int
+count2 n => if n <= 0 then 0 else 1 + count2(n - 1)
 
-add(final, 2)
+printInt(count(2000))
 
-let f2 = final + 2
-f2
+fact : Int -> Int
+fact n => {
+    printInt(n)
+    if n <= 1 then 1
+    else n * fact(n - 1)
+}
+
+let a ∈ Int = 10
+let b = 1212
+count_helper(a, 0)
+
+

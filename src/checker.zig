@@ -4,6 +4,7 @@ const ast = @import("ast.zig");
 const span_ = @import("span.zig");
 const context = @import("context.zig");
 const type_store = @import("type_store.zig");
+const ids = @import("ids.zig");
 
 const CheckedExpr = checked_ast.CheckedExpr;
 const CheckedExprData = checked_ast.CheckedExprKind;
@@ -20,6 +21,20 @@ const TypeExpectation = struct {
     type_id: TypeId,
     span: ?Span,
     reason: []const u8,
+};
+
+const FunctionStatus = enum {
+    declared,
+    defining,
+    defined,
+    external,
+};
+const FunctionInfo = struct {
+    name: []const u8,
+    type_id: TypeId,
+    status: FunctionStatus,
+    sig_span: Span,
+    def_span: ?Span = null,
 };
 
 const Scope = struct {
@@ -68,6 +83,7 @@ pub const Checker = struct {
     type_store: TypeStore,
     next_id: usize = 0,
     next_call_id: usize = 0,
+    functions: std.AutoHashMap(ids.FunctionId, FunctionInfo),
 
     pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
         const global_scope = try ctx.allocator.create(Scope);
@@ -84,6 +100,7 @@ pub const Checker = struct {
             .scopes = scopes,
             .global_scope = global_scope,
             .type_store = type_arena,
+            .functions = std.AutoHashMap(ids.FunctionId, FunctionInfo).init(ctx.allocator),
         };
 
         const print_int_type_id = try checker.type_store.addType(.{ .function = .{
@@ -111,12 +128,101 @@ pub const Checker = struct {
 
     pub fn check(self: *Checker) ![]*CheckedExpr {
         // TODO: add a pre-pass to hoist functions
+        try self.hoistFunctionSignatures();
         var checked_expr = try self.ctx.allocator.alloc(*CheckedExpr, self.exprs.len);
         for (self.exprs, 0..) |expr, idx| {
             checked_expr[idx] = try self.checkExpr(expr, null);
         }
 
+        try self.validateDeclaredFunctionsDefined();
         return checked_expr;
+    }
+
+    fn hoistFunctionSignatures(self: *Checker) !void {
+        for (self.exprs) |expr| {
+            if (std.meta.activeTag(expr.kind) == .func_type_signature) {
+                try self.declareFunctionSignature(expr);
+            }
+        }
+    }
+
+    fn validateDeclaredFunctionsDefined(self: *Checker) !void {
+        var it = self.functions.iterator();
+        while (it.next()) |entry| {
+            const info = entry.value_ptr.*;
+
+            // NOTE: this forbids functions witout a body even if they're not called
+            if (info.status == .declared) {
+                var d = DiagnosticBuilder.err(
+                    self.ctx,
+                    "function `{s}` is declared but not defined",
+                    .{info.name},
+                );
+                _ = d.primaryLabel(info.sig_span, "signature declared here", .{})
+                    .note("add a function body or mark this as external when extern functions exist", .{})
+                    .emit();
+            }
+        }
+    }
+
+    fn declareFunctionSignature(self: *Checker, expr: *ast.Expr) !void {
+        const func_sig = expr.kind.func_type_signature;
+
+        // these should be safe unwraps since we only ever assign a `Function` type
+        // whenever we create a function in the parser
+        const domain = func_sig.ty.kind.function.domain;
+        const codomain = func_sig.ty.kind.function.codomain;
+        const domain_id = try self.resolveTypeExpr(domain);
+        const codomain_id = try self.resolveTypeExpr(codomain);
+
+        std.debug.print("domainId: {d}, codomainId: {d}\n", .{ domain_id, codomain_id });
+
+        const func_type_id = try self.type_store.addType(
+            .{ .function = .{
+                .domain = domain_id,
+                .codomain = codomain_id,
+            } },
+        );
+
+        std.debug.print(
+            "Function `{s}` has typeId `{d}` with {any}\n",
+            .{ func_sig.name, func_type_id, self.type_store.types.items[func_type_id].function },
+        );
+
+        const id = self.getNewId();
+        const func_sym = type_store.Symbol{
+            .name = func_sig.name,
+            .type_id = func_type_id,
+            .kind = .function,
+            .id = id,
+            .span = expr.span,
+            .domain_span = domain.span,
+            .codomain_span = codomain.span,
+        };
+
+        try self.functions.put(id, .{
+            .name = func_sig.name,
+            .type_id = func_type_id,
+            .status = .declared,
+            .sig_span = expr.span,
+        });
+        std.debug.print("function {s} marked as DECLARED -------\n", .{func_sig.name});
+
+        self.currentScope().defineSymbol(func_sym) catch |err| switch (err) {
+            error.SymbolAlreadyDefined => {
+                const previous = self.currentScope().lookupSymbol(func_sig.name).?;
+                var d = DiagnosticBuilder.err(
+                    self.ctx,
+                    "function `{s}` already declared in this scope",
+                    .{func_sig.name},
+                );
+                _ = d.primaryLabel(expr.span, "redeclared here", .{});
+                _ = d.secondaryLabel(previous.span, "first declared here", .{});
+                d.emit();
+            },
+            else => return err,
+        };
+        try self.ctx.debug_names.addFunctionName(func_sym.id, func_sig.name);
     }
 
     fn checkExpr(
@@ -305,6 +411,23 @@ pub const Checker = struct {
             checked_args[idx] = try self.checkExpr(argExpr, arg_exp);
         }
 
+        // const func_info = self.functions.get(func_sym.?.id);
+        // if (func_info) |info| {
+        //     std.debug.print("function `{s}` is currently {s}\n", .{
+        //         info.name, @tagName(info.status),
+        //     });
+        //     if (info.status == .declared) {
+        //         var d = DiagnosticBuilder.err(
+        //             self.ctx,
+        //             "function `{s}` is declared but not defined",
+        //             .{func_call.callee},
+        //         );
+        //         _ = d.primaryLabel(expr.span, "call found here", .{})
+        //             .secondaryLabel(info.sig_span, "declared here", .{})
+        //             .emit();
+        //     }
+        // }
+
         return try self.typedExpr(
             .{
                 .func_call = .{
@@ -353,6 +476,9 @@ pub const Checker = struct {
             }
         }
 
+        // var func_info = self.functions.getPtr(func_sig.?.id) orelse @panic("this should no happen");
+        // func_info.status = .defining;
+
         var checked_params: std.ArrayList(checked_ast.Param) = .empty;
 
         if (func_sig == null) {
@@ -378,6 +504,9 @@ pub const Checker = struct {
                 expr.span,
             );
         }
+
+        try self.markFunctionAs(func_sig.?.id, .defining, expr.span);
+        std.debug.print("marking function {s} as DEFINING ----------------\n", .{func_def.name});
 
         const domain_id = self.type_store.types.items[func_sig.?.type_id].function.domain;
         const codomain_id = self.type_store.types.items[func_sig.?.type_id].function.codomain;
@@ -444,6 +573,9 @@ pub const Checker = struct {
         };
         const body_checked = try self.checkExpr(func_def.body, return_exp);
 
+        try self.markFunctionAs(func_sig.?.id, .defined, expr.span);
+        std.debug.print("marking function {s} as DEFINED ----------------\n", .{func_def.name});
+
         return try self.typedExpr(
             .{ .func_decl = .{
                 .name = func_def.name,
@@ -455,6 +587,20 @@ pub const Checker = struct {
             null,
             expr.span,
         );
+    }
+
+    fn markFunctionAs(
+        self: *Checker,
+        func_id: ids.FunctionId,
+        status: FunctionStatus,
+        span: Span,
+    ) !void {
+        var info = self.functions.getPtr(func_id) orelse return error.FunctionNotFound;
+        info.status = status;
+        switch (status) {
+            .defined => info.def_span = span,
+            else => {},
+        }
     }
 
     fn collectParamTypes(self: *const Checker, type_id: TypeId) ![]TypeId {
@@ -490,61 +636,18 @@ pub const Checker = struct {
 
     fn checkFunctionTypeSignature(self: *Checker, expr: *const ast.Expr) !*CheckedExpr {
         const func_sig = expr.kind.func_type_signature;
+        const sym = self.currentScope().lookupSymbol(func_sig.name) orelse return error.FunctionNotFound;
+        const func_type = self.type_store.types.items[sym.type_id].function;
 
-        // these should be safe unwraps since we only ever assign a `Function` type
-        // whenever we create a function in the parser
         const domain = func_sig.ty.kind.function.domain;
         const codomain = func_sig.ty.kind.function.codomain;
-        const domain_id = try self.resolveTypeExpr(domain);
-        const codomain_id = try self.resolveTypeExpr(codomain);
-
-        std.debug.print("domainId: {d}, codomainId: {d}\n", .{ domain_id, codomain_id });
-
-        const func_type_id = try self.type_store.addType(
-            .{ .function = .{
-                .domain = domain_id,
-                .codomain = codomain_id,
-            } },
-        );
-
-        std.debug.print(
-            "Function `{s}` has typeId `{d}` with {any}\n",
-            .{ func_sig.name, func_type_id, self.type_store.types.items[func_type_id].function },
-        );
-
-        const id = self.getNewId();
-        const func_sym = type_store.Symbol{
-            .name = func_sig.name,
-            .type_id = func_type_id,
-            .kind = .function,
-            .id = id,
-            .span = expr.span,
-            .domain_span = domain.span,
-            .codomain_span = codomain.span,
-        };
-
-        self.currentScope().defineSymbol(func_sym) catch |err| switch (err) {
-            error.SymbolAlreadyDefined => {
-                const previous = self.currentScope().lookupSymbol(func_sig.name).?;
-                var d = DiagnosticBuilder.err(
-                    self.ctx,
-                    "function `{s}` already declared in this scope",
-                    .{func_sig.name},
-                );
-                _ = d.primaryLabel(expr.span, "redeclared here", .{});
-                _ = d.secondaryLabel(previous.span, "first declared here", .{});
-                d.emit();
-            },
-            else => return err,
-        };
-        try self.ctx.debug_names.addFunctionName(func_sym.id, func_sig.name);
 
         return try self.typedExpr(
             .{
                 .func_type_signature = .{
                     .name = func_sig.name,
-                    .domain = .{ .type_id = domain_id, .span = domain.span },
-                    .codomain = .{ .type_id = codomain_id, .span = codomain.span },
+                    .domain = .{ .type_id = func_type.domain, .span = domain.span },
+                    .codomain = .{ .type_id = func_type.codomain, .span = codomain.span },
                 },
             },
             self.type_store.builtins.unit,

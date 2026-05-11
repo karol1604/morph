@@ -32,6 +32,10 @@ const cases = [_]Case{
     .{ .source = "tests/e2e/cases/024-stress.mp", .expected_exit = 42 },
     .{ .source = "tests/e2e/cases/025-tco-applies.mp", .expected_exit = 1 },
     .{ .source = "tests/e2e/cases/026-spills_many_live_locals.mp", .expected_exit = 16 },
+    .{ .source = "tests/e2e/cases/027-short_circuit_calls.mp", .expected_exit = 18 },
+    .{ .source = "tests/e2e/cases/028-shadowing_branches.mp", .expected_exit = 24 },
+    .{ .source = "tests/e2e/cases/029-tail_factorial.mp", .expected_exit = 208 },
+    .{ .source = "tests/e2e/cases/030-live_params_across_call.mp", .expected_exit = 42 },
 };
 
 test "e2e test suite" {
