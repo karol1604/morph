@@ -2,6 +2,8 @@ const std = @import("std");
 
 const zspan = @import("zspan");
 
+pub const ast = @import("ast.zig");
+pub const checked_ast = @import("checked_ast.zig");
 pub const checker = @import("checker.zig");
 pub const codegen = @import("codegen.zig");
 pub const context = @import("context.zig");
@@ -10,13 +12,11 @@ pub const ir = @import("ir.zig");
 pub const lexer = @import("lexer.zig");
 pub const parser = @import("parser.zig");
 pub const Span = @import("span.zig").Span;
-pub const targ = @import("target.zig");
-pub const utils = @import("utils.zig");
-pub const type_store = @import("type_store.zig");
-pub const checked_ast = @import("checked_ast.zig");
-pub const tok = @import("token.zig");
-pub const ast = @import("ast.zig");
 const tail_call_analyzer = @import("tail_call_analyzer.zig");
+pub const targ = @import("target.zig");
+pub const tok = @import("token.zig");
+pub const type_store = @import("type_store.zig");
+pub const utils = @import("utils.zig");
 
 const Args = struct {
     path: []const u8,

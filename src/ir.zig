@@ -30,21 +30,6 @@ pub const Operand = struct {
             .function => |id| try writer.print("function({d})", .{id}),
         };
     }
-
-    pub fn toString(self: Operand) []const u8 {
-        return switch (self.value) {
-            .temp => |id| std.fmt.allocPrint(std.heap.page_allocator, "t{d}", .{id}) catch
-                @panic("Failed to format temp operand"),
-            .unit => "()",
-            .int => |i| std.fmt.allocPrint(std.heap.page_allocator, "{d}", .{i}) catch
-                @panic("Failed to format int operand"),
-            .bool => |b| if (b) "true" else "false",
-            .local => |id| std.fmt.allocPrint(std.heap.page_allocator, "local({d})", .{id}) catch
-                @panic("Failed to format local operand"),
-            .function => |id| std.fmt.allocPrint(std.heap.page_allocator, "function({d})", .{id}) catch
-                @panic("Failed to format function operand"),
-        };
-    }
 };
 
 pub const Terminator = union(enum) {

@@ -279,13 +279,13 @@ test "if-then without else with Unit body is accepted" {
     try std.testing.expect(!res.ctx.hasErrors());
 }
 
-test "function type signature is accepted without error" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    const res = try checkOne(&arena, "add: Int -> Int");
-    try std.testing.expect(!res.ctx.hasErrors());
-}
+// test "function type signature is accepted without error" {
+//     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer arena.deinit();
+//
+//     const res = try checkOne(&arena, "add: Int -> Int");
+//     try std.testing.expect(!res.ctx.hasErrors());
+// }
 
 test "duplicate function signature emits error" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

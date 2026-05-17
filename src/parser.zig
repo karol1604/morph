@@ -36,8 +36,8 @@ pub const Parser = struct {
         return ptr;
     }
 
-    pub fn parse(self: *Parser) ![]*Expr {
-        var res: std.ArrayList(*Expr) = .empty;
+    pub fn parse(self: *Parser) ![]*const Expr {
+        var res: std.ArrayList(*const Expr) = .empty;
         _ = self.consumeSeparators(); // skip leading separators
 
         while (self.currentToken().kind != .eof) {
@@ -199,7 +199,6 @@ pub const Parser = struct {
             .int_literal => try self.parseIntLiteral(),
             .identifier => try self.parseIdentifierOrFunctionCall(),
             .kw_true, .kw_false => try self.parseBoolLiteral(),
-            // .KwLet => try self.parseVariableDecl(),
             .kw_if => try self.parseIfExpression(),
             .plus, .minus, .bang => try self.parseUnaryExpression(),
             .lparen => try self.parseGroupExpression(),

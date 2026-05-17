@@ -1,18 +1,35 @@
-count_helper : Int × Int -> Int
-count_helper n acc => {
-    printInt(acc)
-    if n <= 0 then acc
-    else count_helper(n - 1, acc + 1)
+isEven : Int -> Bool
+isEven n => {
+    if n == 0 then
+        true
+    else if n == 1 then
+        false
+    else
+        isEven(n - 2)
 }
 
-count : Int -> Int
-count n => count_helper(n, 0)
 
-fact : Int -> Int
-fact n => {
-    printInt(n)
-    if n <= 0 then 1
-    else n * fact(n - 1)
+collatz : Int -> Int
+collatz n => {
+    if isEven(n) then
+        n / 2
+    else
+        3 * n + 1
 }
 
-printInt(count(20))
+collatz_seq : Int -> Unit
+collatz_seq n => {
+    let x = n
+    if x == 1 then
+        printInt(x)
+    else {
+        printInt(x)
+        collatz_seq(collatz(x))
+    }
+}
+
+collatz_seq(6171)
+if 1==1 then {
+    let a = 1
+    printInt(a)
+}

@@ -9,15 +9,15 @@ const ExprKind = ast.ExprKind;
 const BinaryOperator = ast.BinaryOperator;
 const UnaryOperator = ast.UnaryOperator;
 
-fn parse(arena: *std.heap.ArenaAllocator, source: []const u8) ![]*ast.Expr {
+fn parse(arena: *std.heap.ArenaAllocator, source: []const u8) ![]*const ast.Expr {
     var ctx = context.CompilerContext.init(arena, source, "<test>");
     var l = try lexer.Lexer.init(&ctx);
     const toks = try l.tokenize();
     var p = parser.Parser.init(toks, &ctx);
-    return p.parse();
+    return try p.parse();
 }
 
-fn parseOne(arena: *std.heap.ArenaAllocator, source: []const u8) !*ast.Expr {
+fn parseOne(arena: *std.heap.ArenaAllocator, source: []const u8) !*const ast.Expr {
     const exprs = try parse(arena, source);
     try std.testing.expectEqual(@as(usize, 1), exprs.len);
     return exprs[0];

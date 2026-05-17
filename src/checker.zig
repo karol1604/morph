@@ -77,7 +77,7 @@ const Scope = struct {
 
 pub const Checker = struct {
     ctx: *context.CompilerContext,
-    exprs: []*ast.Expr,
+    exprs: []*const ast.Expr,
     scopes: std.ArrayList(*Scope),
     global_scope: *Scope,
     type_store: TypeStore,
@@ -85,7 +85,7 @@ pub const Checker = struct {
     next_call_id: usize = 0,
     functions: std.AutoHashMap(ids.FunctionId, FunctionInfo),
 
-    pub fn init(ctx: *context.CompilerContext, exprs: []*ast.Expr) !Checker {
+    pub fn init(ctx: *context.CompilerContext, exprs: []*const ast.Expr) !Checker {
         const global_scope = try ctx.allocator.create(Scope);
         global_scope.* = Scope.init(ctx.allocator, null);
 
@@ -165,7 +165,7 @@ pub const Checker = struct {
         }
     }
 
-    fn declareFunctionSignature(self: *Checker, expr: *ast.Expr) !void {
+    fn declareFunctionSignature(self: *Checker, expr: *const ast.Expr) !void {
         const func_sig = expr.kind.func_type_signature;
 
         // these should be safe unwraps since we only ever assign a `Function` type
@@ -206,7 +206,6 @@ pub const Checker = struct {
             .status = .declared,
             .sig_span = expr.span,
         });
-        std.debug.print("function {s} marked as DECLARED -------\n", .{func_sig.name});
 
         self.currentScope().defineSymbol(func_sym) catch |err| switch (err) {
             error.SymbolAlreadyDefined => {
@@ -284,8 +283,14 @@ pub const Checker = struct {
                 "if expression without an else branch must return Unit",
                 .{},
             );
+            const span = if (std.meta.activeTag(then_checked.kind) == .block)
+                then_checked.kind.block.tail.?.span
+            else
+                then_checked.span;
+
             _ = d.primaryLabel(
-                then_checked.kind.block.tail.?.span, // FIXME: not good
+                // then_checked.kind.block.tail.?.span, // FIXME: not good
+                span,
                 "this has type `{s}`, expected `Unit`",
                 .{self.type_store.formatTypeName(then_checked.type_id)},
             );
@@ -338,7 +343,11 @@ pub const Checker = struct {
         const func_call = expr.kind.func_call;
         const func_sym = self.currentScope().lookupSymbol(func_call.callee);
         if (func_sym == null) {
-            var d = DiagnosticBuilder.err(self.ctx, "call to undeclared function `{s}`", .{func_call.callee});
+            var d = DiagnosticBuilder.err(
+                self.ctx,
+                "call to undeclared function `{s}`",
+                .{func_call.callee},
+            );
             _ = d.primaryLabel(expr.span, "function call found here", .{})
                 .note(
                 "declare a function type signature like `{s} : <params> -> <return type>`",
@@ -506,7 +515,6 @@ pub const Checker = struct {
         }
 
         try self.markFunctionAs(func_sig.?.id, .defining, expr.span);
-        std.debug.print("marking function {s} as DEFINING ----------------\n", .{func_def.name});
 
         const domain_id = self.type_store.types.items[func_sig.?.type_id].function.domain;
         const codomain_id = self.type_store.types.items[func_sig.?.type_id].function.codomain;
@@ -574,7 +582,6 @@ pub const Checker = struct {
         const body_checked = try self.checkExpr(func_def.body, return_exp);
 
         try self.markFunctionAs(func_sig.?.id, .defined, expr.span);
-        std.debug.print("marking function {s} as DEFINED ----------------\n", .{func_def.name});
 
         return try self.typedExpr(
             .{ .func_decl = .{
@@ -608,12 +615,6 @@ pub const Checker = struct {
         var param_types: std.ArrayList(TypeId) = .empty;
 
         switch (type_item) {
-            // .Named => |name| {
-            //     if (std.mem.eql(u8, name, "Unit")) {
-            //         return paramTypes.toOwnedSlice(self.ctx.allocator); // special case for no function params
-            //     }
-            //     try paramTypes.append(self.ctx.allocator, typeId);
-            // },
             .unit => {}, // NOTE: is this good?
             .product => |prod| {
                 // try paramTypes.append(self.ctx.allocator, prod.left);
