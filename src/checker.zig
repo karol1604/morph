@@ -514,6 +514,34 @@ pub const Checker = struct {
             );
         }
 
+        if (self.functions.get(func_sig.?.id)) |info| {
+            std.debug.print("function `{s}` is currently {s} ------------------------------\n", .{
+                info.name, @tagName(info.status),
+            });
+            if (info.status == .defined) {
+                var d = DiagnosticBuilder.err(
+                    self.ctx,
+                    "function `{s}` is already defined",
+                    .{func_def.name},
+                );
+                _ = d.primaryLabel(expr.span, "redefinition found here", .{})
+                    .secondaryLabel(info.def_span.?, "previous definition here", .{})
+                    .note("consider removing one of these", .{})
+                    .emit();
+                return try self.typedExpr(
+                    .{ .func_decl = .{
+                        .name = func_def.name,
+                        .body = undefined,
+                        .params = try checked_params.toOwnedSlice(self.ctx.allocator),
+                        .function_id = func_sig.?.id,
+                    } },
+                    self.type_store.builtins.err,
+                    null,
+                    expr.span,
+                );
+            }
+        }
+
         try self.markFunctionAs(func_sig.?.id, .defining, expr.span);
 
         const domain_id = self.type_store.types.items[func_sig.?.type_id].function.domain;

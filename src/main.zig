@@ -119,19 +119,19 @@ pub fn main(init: std.process.Init) !void {
     var lex = lexer.Lexer.init(&ctx) catch return error.LexerInitFailed;
     const tokens = try lex.tokenize();
 
-    std.debug.print("Tokens:\n", .{});
-    for (tokens, 0..) |token, idx| {
-        std.debug.print("  {d}: {f}\n", .{ idx, token });
-    }
+    // std.debug.print("Tokens:\n", .{});
+    // for (tokens, 0..) |token, idx| {
+    //     std.debug.print("  {d}: {f}\n", .{ idx, token });
+    // }
 
     var pars = parser.Parser.init(tokens, &ctx);
 
     const exprs = try pars.parse();
-    std.debug.print("Expression(s):\n", .{});
-    for (exprs) |expr| {
-        std.debug.print("- ", .{});
-        utils.prettyPrintExpression(expr.*);
-    }
+    // std.debug.print("Expression(s):\n", .{});
+    // for (exprs) |expr| {
+    //     std.debug.print("- ", .{});
+    //     utils.prettyPrintExpression(expr.*);
+    // }
 
     var check = try checker.Checker.init(&ctx, exprs);
     const checked_exprs = try check.check();
