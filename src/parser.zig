@@ -122,14 +122,17 @@ pub const Parser = struct {
     fn parseFunctionDefinition(self: *Parser) !*Expr {
         const name = try self.parseIdentifier(); // consumes the name
 
-        var params: std.ArrayList([]const u8) = .empty;
+        var params: std.ArrayList(ast.Param) = .empty;
 
         while (self.currentToken().kind != .double_right_arrow) {
             const param = try self.parseIdentifier();
             if (std.meta.activeTag(param.kind) != .identifier) {
                 return error.ExpectedIdentifier;
             }
-            try params.append(self.ctx.allocator, param.kind.identifier);
+            try params.append(self.ctx.allocator, .{
+                .name = param.kind.identifier,
+                .span = param.span,
+            });
 
             // if (self.currentToken().kind == .Comma) {
             //     self.advance(); // consume comma

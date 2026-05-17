@@ -581,25 +581,37 @@ pub const Checker = struct {
         defer self.exitScope();
 
         for (params, 0..) |paramTypeId, idx| {
-            const param_name = func_def.params[idx];
+            const param = func_def.params[idx];
             const id = self.getNewId();
 
             try checked_params.append(self.ctx.allocator, .{
-                .name = param_name,
+                .name = param.name,
                 .type_id = paramTypeId,
                 .local_id = id,
             });
             const param_sym = type_store.Symbol{
-                .name = param_name,
+                .name = param.name,
                 .type_id = paramTypeId,
                 .kind = .variable,
                 .id = id,
-                .span = expr.span, // FIXME: add spans to params
+                .span = param.span, // FIXME: add spans to params
                 .domain_span = null,
                 .codomain_span = null,
             };
-            try self.currentScope().defineSymbol(param_sym);
-            try self.ctx.debug_names.addLocalName(param_sym.id, param_name);
+            self.currentScope().defineSymbol(param_sym) catch |err| switch (err) {
+                error.SymbolAlreadyDefined => {
+                    var d = DiagnosticBuilder.err(
+                        self.ctx,
+                        "parameter name `{s}` is duplicated",
+                        .{param.name},
+                    );
+                    _ = d.primaryLabel(param_sym.span, "redeclared here", .{})
+                        .note("consider renaming one of these parameters", .{})
+                        .emit();
+                },
+                else => return err,
+            };
+            try self.ctx.debug_names.addLocalName(param_sym.id, param.name);
         }
 
         const return_exp = TypeExpectation{

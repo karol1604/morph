@@ -7,6 +7,11 @@ pub const TypeExpr = struct {
     span: span.Span,
 };
 
+pub const Param = struct {
+    name: []const u8,
+    span: span.Span,
+};
+
 pub const TypeExprKind = union(enum) {
     named: []const u8,
     unit,
@@ -60,7 +65,8 @@ pub const ExprKind = union(enum) {
 
     func_def: struct {
         name: []const u8,
-        params: [][]const u8,
+        // params: [][]const u8, // FIXME: should this be an expr?
+        params: []const Param,
         body: *const Expr,
     },
 
