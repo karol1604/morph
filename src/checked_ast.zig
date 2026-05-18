@@ -19,6 +19,7 @@ pub const Param = struct {
     name: []const u8,
     type_id: TypeId,
     local_id: ids.LocalId, // unique id for this parameter
+    span: Span,
 };
 
 pub const CheckedExprKind = union(enum) {

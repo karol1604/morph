@@ -1,20 +1,14 @@
--- test : Unit -> Unit
--- test => {
---     printInt(1 + 2);
--- }
--- 
--- test => {
---     printInt(1 + 2);
---     printInt(1 + 2);
---     printInt(1 + 2);
---     printInt(1 + 2);
--- }
+test : Unit -> Unit
+test => {
+    printInt(1 + 2);
+}
 
-
--- test()
+test()
 
 add : Int × Int -> Int
-add x y => x + y
+add x yasdasd => {
+    x
+}
 
 
-add(34, 35)
+printInt(add(34, 35))

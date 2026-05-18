@@ -141,6 +141,7 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
+    defer stdout.flush() catch {};
 
     if (ctx.hasErrors()) {
         std.debug.print("\nCompilation failed with errors:\n", .{});
@@ -148,6 +149,8 @@ pub fn main(init: std.process.Init) !void {
         try stdout.flush();
         return error.CompilationFailed;
     }
+
+    try printDiagnostics(&ctx, stdout);
 
     for (checked_exprs) |expr| {
         std.debug.print("- ", .{});

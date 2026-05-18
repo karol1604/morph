@@ -252,7 +252,7 @@ pub const Checker = struct {
             .binary => return try self.checkBinaryExpr(expr, type_exp),
             .variable_decl => return try self.checkVariableDecl(expr),
             .identifier => return try self.checkIdentifier(expr, type_exp),
-            .block => return try self.checkBlock(expr, type_exp),
+            .block => return try self.checkBlock(expr, type_exp, true),
             .func_type_signature => return try self.checkFunctionTypeSignature(expr),
             .func_def => return try self.checkFunctionDef(expr),
             .func_call => return try self.checkFunctionCall(expr, type_exp),
@@ -485,9 +485,6 @@ pub const Checker = struct {
             }
         }
 
-        // var func_info = self.functions.getPtr(func_sig.?.id) orelse @panic("this should no happen");
-        // func_info.status = .defining;
-
         var checked_params: std.ArrayList(checked_ast.Param) = .empty;
 
         if (func_sig == null) {
@@ -515,9 +512,6 @@ pub const Checker = struct {
         }
 
         if (self.functions.get(func_sig.?.id)) |info| {
-            std.debug.print("function `{s}` is currently {s} ------------------------------\n", .{
-                info.name, @tagName(info.status),
-            });
             if (info.status == .defined) {
                 var d = DiagnosticBuilder.err(
                     self.ctx,
@@ -588,6 +582,7 @@ pub const Checker = struct {
                 .name = param.name,
                 .type_id = paramTypeId,
                 .local_id = id,
+                .span = param.span,
             });
             const param_sym = type_store.Symbol{
                 .name = param.name,
@@ -619,7 +614,25 @@ pub const Checker = struct {
             .span = func_sig.?.codomain_span,
             .reason = "declared return type here",
         };
-        const body_checked = try self.checkExpr(func_def.body, return_exp);
+        const body_checked = if (std.meta.activeTag(func_def.body.kind) == .block)
+            try self.checkBlock(func_def.body, return_exp, false)
+        else
+            try self.checkExpr(func_def.body, return_exp);
+
+        var used_locals = std.AutoHashMap(ids.LocalId, void).init(self.ctx.allocator);
+        try collectUsedLocals(body_checked, &used_locals);
+
+        for (checked_params.items) |param| {
+            if (!used_locals.contains(param.local_id)) {
+                var d = DiagnosticBuilder.warn(
+                    self.ctx,
+                    "parameter `{s}` is not used in the function body",
+                    .{param.name},
+                );
+                _ = d.primaryLabel(param.span, "declared here", .{})
+                    .emit();
+            }
+        }
 
         try self.markFunctionAs(func_sig.?.id, .defined, expr.span);
 
@@ -634,6 +647,35 @@ pub const Checker = struct {
             null,
             expr.span,
         );
+    }
+
+    fn collectUsedLocals(
+        expr: *const CheckedExpr,
+        used: *std.AutoHashMap(ids.LocalId, void),
+    ) !void {
+        switch (expr.kind) {
+            .identifier => |ident| {
+                try used.put(ident.local_id, {});
+            },
+            .unary => |unary| try collectUsedLocals(unary.right, used),
+            .binary => |binary| {
+                try collectUsedLocals(binary.left, used);
+                try collectUsedLocals(binary.right, used);
+            },
+            .block => |block| {
+                for (block.stmts) |stmt| try collectUsedLocals(stmt, used);
+                if (block.tail) |tail| try collectUsedLocals(tail, used);
+            },
+            .func_call => |call| {
+                for (call.args) |arg| try collectUsedLocals(arg, used);
+            },
+            .@"if" => |ifExpr| {
+                try collectUsedLocals(ifExpr.condition, used);
+                try collectUsedLocals(ifExpr.then_branch, used);
+                if (ifExpr.else_branch) |elseBranch| try collectUsedLocals(elseBranch, used);
+            },
+            else => {},
+        }
     }
 
     fn markFunctionAs(
@@ -733,11 +775,16 @@ pub const Checker = struct {
         }
     }
 
-    fn checkBlock(self: *Checker, expr: *const ast.Expr, type_exp: ?TypeExpectation) !*CheckedExpr {
+    fn checkBlock(
+        self: *Checker,
+        expr: *const ast.Expr,
+        type_exp: ?TypeExpectation,
+        creates_scope: bool,
+    ) !*CheckedExpr {
         const block = expr.kind.block;
 
-        try self.enterNewScope();
-        defer self.exitScope();
+        if (creates_scope) try self.enterNewScope();
+        defer if (creates_scope) self.exitScope();
 
         var checked_stmts = try self.ctx.allocator.alloc(*CheckedExpr, block.stmts.len);
         for (block.stmts, 0..) |stmt, idx| {

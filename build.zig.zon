@@ -33,8 +33,8 @@
     // internet connectivity.
     .dependencies = .{
         .zspan = .{
-            .url = "git+https://github.com/karol1604/zspan.git#162b6a24b972f64bcba77afc79c7dcc253f6a44d",
-            .hash = "zspan-0.0.0-6MWl4AviAADK4ZL4NFVXJU7FtUtRnwx1D9poZuENyfMv",
+            .url = "git+https://github.com/karol1604/zspan.git#7a1314f982d47bb208a1790d79dc829db4f58765",
+            .hash = "zspan-0.0.0-6MWl4GfiAAAPvweZrkdddUUj9UAm4NyVKjh1LPbrrQXa",
         },
     },
     .paths = .{
